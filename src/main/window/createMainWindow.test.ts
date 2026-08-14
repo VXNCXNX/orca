@@ -6,6 +6,7 @@ const {
   openExternalMock,
   attachGuestPoliciesMock,
   attachRouteGuestMock,
+  retireRouteRendererMock,
   buildFromTemplateMock,
   menuPopupMock,
   notificationMock,
@@ -23,6 +24,7 @@ const {
     openExternalMock: vi.fn(),
     attachGuestPoliciesMock: vi.fn(),
     attachRouteGuestMock: vi.fn(() => false),
+    retireRouteRendererMock: vi.fn(),
     buildFromTemplateMock: vi.fn(() => ({ popup: menuPopupMock })),
     menuPopupMock,
     notificationMock: vi.fn(function () {
@@ -73,7 +75,10 @@ vi.mock('../browser/browser-manager', () => ({
 
 vi.mock('../browser/browser-route-session-runtime', () => ({
   browserRouteSessionRegistry: { isAllowedPartition: routePartitionAllowedMock },
-  browserRouteWebContentsRegistry: { attachGuest: attachRouteGuestMock }
+  browserRouteWebContentsRegistry: {
+    attachGuest: attachRouteGuestMock,
+    retireRenderer: retireRouteRendererMock
+  }
 }))
 
 import {
@@ -106,6 +111,7 @@ describe('createMainWindow', () => {
     attachGuestPoliciesMock.mockReset()
     attachRouteGuestMock.mockReset()
     attachRouteGuestMock.mockReturnValue(false)
+    retireRouteRendererMock.mockReset()
     buildFromTemplateMock.mockClear()
     menuPopupMock.mockClear()
     notificationMock.mockClear()
@@ -1986,6 +1992,7 @@ describe('createMainWindow', () => {
   it('allows close after the renderer process is gone', () => {
     const windowHandlers: Record<string, (...args: any[]) => void> = {}
     const webContents = {
+      id: 71,
       on: vi.fn((event, handler) => {
         windowHandlers[event] = handler
       }),
@@ -2025,6 +2032,7 @@ describe('createMainWindow', () => {
         exitCode: 5
       } as never
     )
+    expect(retireRouteRendererMock).toHaveBeenCalledWith(71)
     const preventDefault = vi.fn()
     windowHandlers.close({ preventDefault } as never)
 
