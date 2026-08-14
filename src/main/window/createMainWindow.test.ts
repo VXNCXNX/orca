@@ -7,6 +7,8 @@ const {
   attachGuestPoliciesMock,
   attachRouteGuestMock,
   retireRouteRendererMock,
+  attachClientPageRendererMock,
+  retireClientPageRendererMock,
   buildFromTemplateMock,
   menuPopupMock,
   notificationMock,
@@ -25,6 +27,8 @@ const {
     attachGuestPoliciesMock: vi.fn(),
     attachRouteGuestMock: vi.fn(() => false),
     retireRouteRendererMock: vi.fn(),
+    attachClientPageRendererMock: vi.fn(),
+    retireClientPageRendererMock: vi.fn(),
     buildFromTemplateMock: vi.fn(() => ({ popup: menuPopupMock })),
     menuPopupMock,
     notificationMock: vi.fn(function () {
@@ -81,6 +85,11 @@ vi.mock('../browser/browser-route-session-runtime', () => ({
   }
 }))
 
+vi.mock('../browser/browser-client-page-renderer-runtime', () => ({
+  attachBrowserClientPageRenderer: attachClientPageRendererMock,
+  retireBrowserClientPageRenderer: retireClientPageRendererMock
+}))
+
 import {
   createMainWindow,
   loadMainWindow,
@@ -112,6 +121,8 @@ describe('createMainWindow', () => {
     attachRouteGuestMock.mockReset()
     attachRouteGuestMock.mockReturnValue(false)
     retireRouteRendererMock.mockReset()
+    attachClientPageRendererMock.mockReset()
+    retireClientPageRendererMock.mockReset()
     buildFromTemplateMock.mockClear()
     menuPopupMock.mockClear()
     notificationMock.mockClear()
@@ -173,6 +184,9 @@ describe('createMainWindow', () => {
   it('enables renderer sandboxing and opens external links safely', () => {
     const windowHandlers: Record<string, (...args: any[]) => void> = {}
     const webContents = {
+      getURL: vi.fn(() => 'file:///opt/orca/renderer/index.html'),
+      isDestroyed: vi.fn(() => false),
+      mainFrame: {},
       on: vi.fn((event, handler) => {
         windowHandlers[event] = handler
       }),
@@ -2211,6 +2225,8 @@ describe('createMainWindow', () => {
     windowHandlers.close({ preventDefault } as never)
 
     expect(preventDefault).toHaveBeenCalledTimes(1)
+    expect(retireClientPageRendererMock).toHaveBeenCalledWith(webContents)
+    expect(attachClientPageRendererMock).toHaveBeenCalledWith(webContents)
     expect(webContents.send).toHaveBeenCalledWith('window:close-requested', {
       isQuitting: true,
       requestId: expect.any(Number)
@@ -2968,9 +2984,13 @@ describe('createMainWindow', () => {
     expect(() => windowHandlers.closed?.()).not.toThrow()
   })
 
-  it('resets the markdown editor focus flag on renderer crash, navigation, and destroy', () => {
+  it('retires renderer generations and resets focus on crash, navigation, and destroy', async () => {
     const windowHandlers: Record<string, (...args: any[]) => void> = {}
     const webContents = {
+      getURL: vi.fn(() => 'file:///opt/orca/renderer/index.html'),
+      isDestroyed: vi.fn(() => false),
+      isLoadingMainFrame: vi.fn(() => false),
+      mainFrame: {},
       on: vi.fn((event, handler) => {
         windowHandlers[event] = handler
       }),
@@ -3001,6 +3021,8 @@ describe('createMainWindow', () => {
     })
 
     createMainWindow(null)
+    windowHandlers['did-finish-load']?.()
+    expect(attachClientPageRendererMock).toHaveBeenCalledWith(webContents)
 
     const setFocusedListener = vi
       .mocked(ipcMain.on)
@@ -3026,18 +3048,48 @@ describe('createMainWindow', () => {
     }
 
     // render-process-gone
+    retireClientPageRendererMock.mockClear()
     setFocusedListener?.({ sender: webContents } as never, true)
     windowHandlers['render-process-gone']?.()
+    expect(retireClientPageRendererMock).toHaveBeenCalledWith(webContents)
     assertInterceptsAfterReset()
+    windowHandlers['did-finish-load']?.()
 
-    // did-start-navigation (main frame)
+    // Blocked external navigation leaves the current renderer document alive.
+    retireClientPageRendererMock.mockClear()
     setFocusedListener?.({ sender: webContents } as never, true)
     windowHandlers['did-start-navigation']?.({} as never, 'https://example.com/', false, true)
+    expect(retireClientPageRendererMock).not.toHaveBeenCalled()
+
+    // Renderer document replacement retires before the new document loads.
+    windowHandlers['did-start-navigation']?.(
+      {} as never,
+      'file:///opt/orca/renderer/index.html?reload=1',
+      false,
+      true
+    )
+    expect(retireClientPageRendererMock).toHaveBeenCalledWith(webContents)
     assertInterceptsAfterReset()
 
-    // did-start-navigation (sub-frame) should NOT reset the flag
+    // Failed replacement keeps the exact old document and restores its bridge.
+    attachClientPageRendererMock.mockClear()
+    windowHandlers['did-fail-provisional-load']?.(
+      {} as never,
+      -3,
+      'aborted',
+      'file:///opt/orca/renderer/index.html?reload=1',
+      true
+    )
+    await Promise.resolve()
+    expect(attachClientPageRendererMock).toHaveBeenCalledWith(webContents)
+
+    // Same-document and sub-frame navigation should not retire or reset the renderer.
+    retireClientPageRendererMock.mockClear()
     setFocusedListener?.({ sender: webContents } as never, true)
+    windowHandlers['did-start-navigation']?.({} as never, '#same-document', true, true)
+    expect(retireClientPageRendererMock).not.toHaveBeenCalled()
     windowHandlers['did-start-navigation']?.({} as never, 'https://example.com/', false, false)
+    expect(retireClientPageRendererMock).not.toHaveBeenCalled()
     webContents.send.mockClear()
     const subframePreventDefault = vi.fn()
     windowHandlers['before-input-event'](
@@ -3048,8 +3100,10 @@ describe('createMainWindow', () => {
     expect(webContents.send).not.toHaveBeenCalledWith('ui:toggleLeftSidebar')
 
     // destroyed
+    retireClientPageRendererMock.mockClear()
     setFocusedListener?.({ sender: webContents } as never, true)
     windowHandlers['destroyed']?.()
+    expect(retireClientPageRendererMock).toHaveBeenCalledWith(webContents)
     assertInterceptsAfterReset()
   })
 
