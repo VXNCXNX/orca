@@ -11,6 +11,7 @@ const {
   notificationShowMock,
   powerMonitorOnMock,
   powerMonitorRemoveListenerMock,
+  routePartitionAllowedMock,
   isMock,
   macosTahoeMock
 } = vi.hoisted(() => {
@@ -28,6 +29,7 @@ const {
     notificationShowMock,
     powerMonitorOnMock: vi.fn(),
     powerMonitorRemoveListenerMock: vi.fn(),
+    routePartitionAllowedMock: vi.fn((_partition: string) => false),
     isMock: { dev: false },
     macosTahoeMock: { value: false }
   }
@@ -67,6 +69,10 @@ vi.mock('../browser/browser-manager', () => ({
   }
 }))
 
+vi.mock('../browser/browser-route-session-runtime', () => ({
+  browserRouteSessionRegistry: { isAllowedPartition: routePartitionAllowedMock }
+}))
+
 import {
   createMainWindow,
   loadMainWindow,
@@ -101,6 +107,8 @@ describe('createMainWindow', () => {
     notificationShowMock.mockClear()
     powerMonitorOnMock.mockReset()
     powerMonitorRemoveListenerMock.mockReset()
+    routePartitionAllowedMock.mockReset()
+    routePartitionAllowedMock.mockReturnValue(false)
     isMock.dev = false
     macosTahoeMock.value = false
     vi.mocked(ipcMain.on).mockReset()
@@ -260,6 +268,29 @@ describe('createMainWindow', () => {
       preload: expect.stringMatching(/browser-window-close-preload\.js$/),
       sandbox: true
     })
+
+    routePartitionAllowedMock.mockImplementation(
+      (partition) => partition === 'persist:orca-browser-v1-route-partition'
+    )
+    const allowRouteEvent = { preventDefault: vi.fn() }
+    const allowRoutePrefs = { partition: 'persist:orca-browser-v1-route-partition' }
+    windowHandlers['will-attach-webview'](
+      allowRouteEvent as never,
+      allowRoutePrefs as never,
+      { src: 'about:blank' } as never
+    )
+    expect(allowRouteEvent.preventDefault).not.toHaveBeenCalled()
+    expect(allowRoutePrefs).toMatchObject({
+      partition: 'persist:orca-browser-v1-route-partition',
+      sandbox: true
+    })
+    const denyRouteNavigationEvent = { preventDefault: vi.fn() }
+    windowHandlers['will-attach-webview'](
+      denyRouteNavigationEvent as never,
+      { partition: 'persist:orca-browser-v1-route-partition' } as never,
+      { src: 'https://example.com/' } as never
+    )
+    expect(denyRouteNavigationEvent.preventDefault).toHaveBeenCalledOnce()
 
     const denyInlineHtmlEvent = { preventDefault: vi.fn() }
     windowHandlers['will-attach-webview'](

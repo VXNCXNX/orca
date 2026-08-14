@@ -24,6 +24,7 @@ import type {
   BrowserSessionProfileScope
 } from '../../shared/browser-workspace-types'
 import { browserManager } from './browser-manager'
+import { isBrowserRoutePartition } from './browser-route-identity'
 import { hasSystemMediaAccess, requestSystemMediaAccess } from './browser-media-access'
 import { cleanElectronUserAgent, setupClientHintsOverride } from './browser-session-ua'
 import {
@@ -334,6 +335,29 @@ class BrowserSessionRegistry {
       return this.defaultPartition
     }
     return this.profiles.get(profileId)?.partition ?? null
+  }
+
+  setupRoutePartitionPolicies(partition: string, browserProfileId: string): void {
+    const profile = this.profiles.get(browserProfileId)
+    if (!profile || !isBrowserRoutePartition(partition)) {
+      throw new Error('browser_route_partition_profile_unavailable')
+    }
+    this.setupSessionPolicies({ ...profile, partition })
+  }
+
+  requireRouteBrowserProfile(browserProfileId: string): void {
+    if (!this.profiles.has(browserProfileId)) {
+      throw new Error('browser_route_partition_profile_unavailable')
+    }
+  }
+
+  clearRoutePartitionPolicies(partition: string): void {
+    if (!isBrowserRoutePartition(partition)) {
+      return
+    }
+    const sess = session.fromPartition(partition)
+    clearBrowserSessionUserAgentMode(sess)
+    this.clearSessionPolicies(partition, sess)
   }
 
   createProfile(
