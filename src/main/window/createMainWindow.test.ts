@@ -5,6 +5,7 @@ const {
   browserWindowMock,
   openExternalMock,
   attachGuestPoliciesMock,
+  attachRouteGuestMock,
   buildFromTemplateMock,
   menuPopupMock,
   notificationMock,
@@ -21,6 +22,7 @@ const {
     browserWindowMock: vi.fn(),
     openExternalMock: vi.fn(),
     attachGuestPoliciesMock: vi.fn(),
+    attachRouteGuestMock: vi.fn(() => false),
     buildFromTemplateMock: vi.fn(() => ({ popup: menuPopupMock })),
     menuPopupMock,
     notificationMock: vi.fn(function () {
@@ -70,7 +72,8 @@ vi.mock('../browser/browser-manager', () => ({
 }))
 
 vi.mock('../browser/browser-route-session-runtime', () => ({
-  browserRouteSessionRegistry: { isAllowedPartition: routePartitionAllowedMock }
+  browserRouteSessionRegistry: { isAllowedPartition: routePartitionAllowedMock },
+  browserRouteWebContentsRegistry: { attachGuest: attachRouteGuestMock }
 }))
 
 import {
@@ -101,6 +104,8 @@ describe('createMainWindow', () => {
     browserWindowMock.mockReset()
     openExternalMock.mockReset()
     attachGuestPoliciesMock.mockReset()
+    attachRouteGuestMock.mockReset()
+    attachRouteGuestMock.mockReturnValue(false)
     buildFromTemplateMock.mockClear()
     menuPopupMock.mockClear()
     notificationMock.mockClear()
@@ -303,6 +308,10 @@ describe('createMainWindow', () => {
     const guest = { marker: 'guest' }
     windowHandlers['did-attach-webview']({} as never, guest as never)
     expect(attachGuestPoliciesMock).toHaveBeenCalledWith(guest)
+    expect(attachRouteGuestMock).toHaveBeenCalledWith(guest)
+    expect(attachGuestPoliciesMock.mock.invocationCallOrder[0]).toBeLessThan(
+      attachRouteGuestMock.mock.invocationCallOrder[0]
+    )
 
     const untrustedPreloadParams = {
       src: 'data:text/html,',
@@ -324,6 +333,7 @@ describe('createMainWindow', () => {
     const secondGuest = { marker: 'second-guest' }
     windowHandlers['did-attach-webview']({} as never, secondGuest as never)
     expect(attachGuestPoliciesMock).toHaveBeenLastCalledWith(secondGuest)
+    expect(attachRouteGuestMock).toHaveBeenLastCalledWith(secondGuest)
   })
 
   it('sets platform-specific titlebar and frame options for every desktop platform', () => {
