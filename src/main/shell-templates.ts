@@ -11,54 +11,136 @@ export const SHELL_STARTUP_IDENTITY_MARKER_BLOCK = `if [[ "\${ORCA_SHELL_STARTUP
 fi`
 
 // Why: daemon, local, and relay wrappers must preserve one Bash prompt-hook contract.
-export const BASH_PROMPT_COMMAND_COMPOSITION_BLOCK = `__orca_normalize_prompt_command() {
-  local __orca_joined="" __orca_prompt_part __orca_candidate __orca_trailing_backslashes
-  if [[ "$(declare -p PROMPT_COMMAND 2>/dev/null)" == "declare -a"* ]]; then
-    for __orca_prompt_part in "\${PROMPT_COMMAND[@]}"; do
-      while [[ "$__orca_prompt_part" == *[[:space:]\\;] ]]; do
-        __orca_candidate="\${__orca_prompt_part%?}"
-        __orca_trailing_backslashes="\${__orca_candidate##*[!\\\\]}"
-        # An odd backslash run makes the trailing separator part of the command.
-        (( \${#__orca_trailing_backslashes} % 2 == 0 )) || break
-        __orca_prompt_part="$__orca_candidate"
-      done
-      [[ -n "$__orca_prompt_part" ]] || continue
-      if [[ -n "$__orca_joined" ]]; then
-        __orca_joined="$__orca_joined
-$__orca_prompt_part"
+export const BASH_PROMPT_COMMAND_COMPOSITION_BLOCK = `__orca_normalize_prompt_command_part() {
+  local __orca_value="$1" __orca_output_name="$2" __orca_character __orca_chunk
+  local __orca_value_length=\${#1} __orca_suffix_length=0 __orca_backslash_length=0
+  local __orca_output_length __orca_scan_start
+  while (( __orca_value_length - __orca_suffix_length >= 1024 )); do
+    __orca_scan_start=$(( __orca_value_length - __orca_suffix_length - 1024 ))
+    __orca_chunk="\${__orca_value:__orca_scan_start:1024}"
+    case "$__orca_chunk" in
+      *[!$' \\t\\n;']*) break ;;
+      *) __orca_suffix_length=$(( __orca_suffix_length + 1024 )) ;;
+    esac
+  done
+  while (( __orca_suffix_length < __orca_value_length )); do
+    __orca_character="\${__orca_value: -__orca_suffix_length - 1:1}"
+    case "$__orca_character" in
+      ' '|$'\\t'|$'\\n'|';') __orca_suffix_length=$(( __orca_suffix_length + 1 )) ;;
+      *) break ;;
+    esac
+  done
+  __orca_output_length=$(( \${#__orca_value} - __orca_suffix_length ))
+  while (( __orca_output_length - __orca_backslash_length >= 1024 )); do
+    __orca_scan_start=$(( __orca_output_length - __orca_backslash_length - 1024 ))
+    __orca_chunk="\${__orca_value:__orca_scan_start:1024}"
+    case "$__orca_chunk" in
+      *[!\\\\]*) break ;;
+      *) __orca_backslash_length=$(( __orca_backslash_length + 1024 )) ;;
+    esac
+  done
+  while (( __orca_backslash_length < __orca_output_length )); do
+    __orca_character="\${__orca_value:__orca_output_length - __orca_backslash_length - 1:1}"
+    [[ "$__orca_character" == '\\' ]] || break
+    __orca_backslash_length=$(( __orca_backslash_length + 1 ))
+  done
+  # Preserve the first separator when an odd backslash run escapes it.
+  if (( __orca_suffix_length > 0 && __orca_backslash_length % 2 == 1 )); then
+    __orca_suffix_length=$(( __orca_suffix_length - 1 ))
+    __orca_backslash_length=0
+  fi
+  __orca_output_length=$(( \${#__orca_value} - __orca_suffix_length ))
+  __orca_value="\${__orca_value:0:__orca_output_length}"
+  # Bash 4.0-5.0 scalar prompt evaluation preserves an odd terminal backslash.
+  if (( __orca_suffix_length == 0 && (BASH_VERSINFO[0] == 4 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] == 0)) && __orca_backslash_length % 2 == 1 )); then
+    __orca_value="$__orca_value\\\\"
+  fi
+  printf -v "$__orca_output_name" '%s' "$__orca_value"
+}
+__orca_restore_prompt_status() {
+  return "$1"
+}
+__orca_run_prompt_command_array() {
+  local __orca_exit_code=$? __orca_prompt_part __orca_prompt_index __orca_user_count
+  local __orca_final_prompt_command
+  local __orca_in_prompt_dispatch=1 __orca_dispatching_user_prompt_command=""
+  for __orca_prompt_part in "\${__orca_prompt_command_prefix[@]}"; do
+    if (( __orca_exit_code == 0 )); then
+      eval "$__orca_prompt_part"
+    else
+      __orca_restore_prompt_status "$__orca_exit_code" || eval "$__orca_prompt_part"
+    fi
+  done
+  __orca_user_count=\${#__orca_prompt_command_array[@]}
+  for (( __orca_prompt_index = 0; __orca_prompt_index + 1 < __orca_user_count; __orca_prompt_index++ )); do
+    __orca_prompt_part="\${__orca_prompt_command_array[__orca_prompt_index]}"
+    __orca_dispatching_user_prompt_command=1
+    if (( __orca_exit_code == 0 )); then
+      eval "$__orca_prompt_part"
+    else
+      __orca_restore_prompt_status "$__orca_exit_code" || eval "$__orca_prompt_part"
+    fi
+    __orca_dispatching_user_prompt_command=""
+  done
+  if (( __orca_user_count > 0 )); then
+    __orca_prompt_part="\${__orca_prompt_command_array[__orca_user_count - 1]}"
+    __orca_final_prompt_command='eval "$__orca_prompt_part"'
+    for __orca_prompt_index in "\${!__orca_prompt_command_suffix[@]}"; do
+      __orca_final_prompt_command+=$'\\n'"\${__orca_prompt_command_suffix[__orca_prompt_index]}"
+    done
+    __orca_dispatching_user_prompt_command=1
+    if (( __orca_exit_code == 0 )); then
+      eval "$__orca_final_prompt_command"
+    else
+      __orca_restore_prompt_status "$__orca_exit_code" || eval "$__orca_final_prompt_command"
+    fi
+    __orca_dispatching_user_prompt_command=""
+  else
+    for __orca_prompt_part in "\${__orca_prompt_command_suffix[@]}"; do
+      if (( __orca_exit_code == 0 )); then
+        eval "$__orca_prompt_part"
       else
-        __orca_joined="$__orca_prompt_part"
+        __orca_restore_prompt_status "$__orca_exit_code" || eval "$__orca_prompt_part"
       fi
     done
-    # Assignment alone preserves the array type and its higher indices.
-    unset PROMPT_COMMAND
-    PROMPT_COMMAND="$__orca_joined"
   fi
-  while [[ "\${PROMPT_COMMAND:-}" == *[[:space:]\\;] ]]; do
-    __orca_candidate="\${PROMPT_COMMAND%?}"
-    __orca_trailing_backslashes="\${__orca_candidate##*[!\\\\]}"
-    (( \${#__orca_trailing_backslashes} % 2 == 0 )) || break
-    PROMPT_COMMAND="$__orca_candidate"
+  return "$__orca_exit_code"
+}
+__orca_normalize_prompt_command() {
+  [[ -z "\${__orca_prompt_command_normalized:-}" ]] || return 0
+  local __orca_prompt_part
+  local -a __orca_normalized=()
+  for __orca_prompt_part in "\${PROMPT_COMMAND[@]}"; do
+    __orca_normalize_prompt_command_part "$__orca_prompt_part" __orca_prompt_part
+    [[ -n "$__orca_prompt_part" ]] && __orca_normalized+=("$__orca_prompt_part")
   done
+  __orca_prompt_command_normalized=1
+  if (( BASH_VERSINFO[0] > 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] >= 1) )); then
+    PROMPT_COMMAND=("\${__orca_normalized[@]}")
+  else
+    __orca_prompt_command_array=("\${__orca_normalized[@]}")
+    __orca_prompt_command_prefix=()
+    __orca_prompt_command_suffix=()
+    unset PROMPT_COMMAND
+    PROMPT_COMMAND=__orca_run_prompt_command_array
+  fi
 }
 __orca_prepend_prompt_command() {
   local command="$1"
   __orca_normalize_prompt_command
-  if [[ -n "\${PROMPT_COMMAND:-}" ]]; then
-    PROMPT_COMMAND="$command
-\${PROMPT_COMMAND}"
+  if (( BASH_VERSINFO[0] > 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] >= 1) )); then
+    PROMPT_COMMAND=("$command" "\${PROMPT_COMMAND[@]}")
   else
-    PROMPT_COMMAND="$command"
+    __orca_prompt_command_prefix=("$command" "\${__orca_prompt_command_prefix[@]}")
   fi
 }
 __orca_append_prompt_command() {
   local command="$1"
   __orca_normalize_prompt_command
-  if [[ -n "\${PROMPT_COMMAND:-}" ]]; then
-    PROMPT_COMMAND="\${PROMPT_COMMAND}
-$command"
+  if (( BASH_VERSINFO[0] > 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] >= 1) )); then
+    PROMPT_COMMAND+=("$command")
   else
-    PROMPT_COMMAND="$command"
+    __orca_prompt_command_suffix+=("$command")
   fi
 }`
 

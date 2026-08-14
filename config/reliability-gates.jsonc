@@ -17,22 +17,30 @@
       "protection": "partial",
       "owner": "terminal-session-readiness",
       "layer": "posix-pty-and-shell-startup",
-      "surfaces": ["queued terminal startup commands", "zsh, bash, and Fish startup output"],
+      "surfaces": [
+        "queued terminal startup commands",
+        "zsh, bash, and Fish startup output",
+        "Bash PROMPT_COMMAND lifecycle composition"
+      ],
       "platforms": ["macos", "linux"],
       "providers": ["local", "local-daemon", "ssh-daemon", "ssh-relay", "paired-runtime"],
       "coveredPlatforms": ["macos", "linux"],
       "coveredProviders": ["local", "local-daemon", "ssh-relay", "paired-runtime"],
-      "coverageNotes": "Real macOS node-pty integration covers zsh 5.9 .zshenv/.zprofile and bash 3.2 profile replacement shells, including exec -a names, same-shell and child-process silent reads, a blocking zle-line-init hook, non-shell readline replacements, and a non-shell image renamed zsh. A real Fish PTY proves marker stripping is byte-exact and does not render bracketed-paste control text. An Ubuntu 20.04 container confirms compatible zsh/bash termios. Deterministic owner contracts cover local, daemon, and SSH relay identity/readiness composition plus provider-owned delivery; explicit terminal-paste remains renderer-owned. Live isolated journeys cover a macOS headed desktop owner with paired web client, headless orca serve with paired web client, and a Docker Linux OpenSSH/Bash target with one readiness-time reconnect. Linux desktop, WSL/Windows, live zsh-over-SSH, and physical remote hosts remain gaps.",
+      "coverageNotes": "Real macOS node-pty integration covers zsh 5.9 .zshenv/.zprofile and bash 3.2 profile replacement shells, including exec -a names, same-shell and child-process silent reads, a blocking zle-line-init hook, non-shell readline replacements, and a non-shell image renamed zsh. A real Fish PTY proves marker stripping is byte-exact and does not render bracketed-paste control text. Ubuntu 20.04/Bash 5.0 and Ubuntu 24.04/Bash 5.2 containers cover scalar and array PROMPT_COMMAND composition, including real zoxide on 24.04. Deterministic owner contracts cover local, daemon, and SSH relay identity/readiness composition plus provider-owned delivery; explicit terminal-paste remains renderer-owned. Live isolated journeys cover a macOS headed desktop owner with paired web client, headless orca serve with paired web client, and a Docker Linux OpenSSH/Bash target with one readiness-time reconnect. Linux desktop, WSL/Windows, live zsh-over-SSH, and physical remote hosts remain gaps.",
       "motivatingLinks": [
         "https://github.com/stablyai/orca/issues/13767",
         "https://linear.app/stably/issue/STA-4067",
         "https://linear.app/stably/issue/STA-4068",
-        "https://github.com/stablyai/orca/pull/14161"
+        "https://github.com/stablyai/orca/pull/14161",
+        "https://github.com/stablyai/orca/issues/14448",
+        "https://linear.app/stably/issue/STA-4292",
+        "https://github.com/stablyai/orca/pull/14451"
       ],
-      "invariant": "Shell startup scanning preserves every non-Orca output byte in order across arbitrary PTY chunk boundaries. Before user startup files run, the wrapper publishes its shell PID. If a later exec discards the ready marker, proof-based recovery releases queued startup input only after the launched shell's actual executable image with that exact PID owns the PTY foreground, emits its post-hook line-editor enable sequence, and exposes zle/readline termios; startup reads, line-init hooks, child foreground processes, and non-shell readline replacements cannot trigger that proof. The existing bounded compatibility timeout may enqueue input without proof, but must not publish readiness, lose or duplicate that input across reconnect, or execute it before the replacement shell can accept it.",
-      "oracle": "Split Fish output immediately after the ready marker and after the following ESC introducer; local and daemon owners must emit the exact ESC [ ? 2004 h bytes and headless xterm must not render literal control text. Run the real generated wrappers under node-pty with disposable zsh, bash, and Fish startup files. Plain and exec -a replacement shells must receive one queued command at their first completed line editor without waiting for the 15-second timeout. The identical oracle must time out without the startup identity and prompt fallback. Same-shell reads, child-process reads, a blocking zle-line-init hook, sqlite3, and sqlite3 renamed zsh must not trigger prompt fallback. Relay owner coverage must use the same lossless scanner composition and release through the same prompt contract.",
+      "invariant": "Shell startup scanning preserves every non-Orca output byte in order across arbitrary PTY chunk boundaries. Bash scalar and supported array PROMPT_COMMAND values preserve user bytes, hook order, and foreground exit status while emitting exactly one OSC 133 A/C/D lifecycle without syntax errors. Before user startup files run, the wrapper publishes its shell PID. If a later exec discards the ready marker, proof-based recovery releases queued startup input only after the launched shell's actual executable image with that exact PID owns the PTY foreground, emits its post-hook line-editor enable sequence, and exposes zle/readline termios; startup reads, line-init hooks, child foreground processes, and non-shell readline replacements cannot trigger that proof. The existing bounded compatibility timeout may enqueue input without proof, but must not publish readiness, lose or duplicate that input across reconnect, or execute it before the replacement shell can accept it.",
+      "oracle": "Split Fish output immediately after the ready marker and after the following ESC introducer; local and daemon owners must emit the exact ESC [ ? 2004 h bytes and headless xterm must not render literal control text. Run the real generated wrappers under node-pty with disposable zsh, bash, and Fish startup files. Exercise Bash scalar and array PROMPT_COMMAND values with empty, repeated, escaped, whitespace, control-byte, odd-backslash, status-mutating, DEBUG-trap, zoxide, and RHEL-style hooks; require exact A,C,D:0,A,C,D:1,A,C ordering and byte preservation. Plain and exec -a replacement shells must receive one queued command at their first completed line editor without waiting for the 15-second timeout. The identical oracle must time out without the startup identity and prompt fallback. Same-shell reads, child-process reads, a blocking zle-line-init hook, sqlite3, and sqlite3 renamed zsh must not trigger prompt fallback. Relay owner coverage must use the same lossless scanner composition and release through the same prompt contract.",
       "commands": [
         "pnpm exec vitest run --config config/vitest.config.ts src/main/daemon/repro-13767-shell-ready-marker-lost-to-exec.test.ts src/main/daemon/bash-prompt-command-composition.test.ts src/main/line-editor-ready-output-scanner.test.ts src/main/shell-startup-identity-scanner.test.ts src/main/shell-startup-output-scanner.test.ts src/main/shell-prompt-readiness-probe.test.ts src/shared/pty-slave-line-discipline-echo.test.ts src/shared/shell-process-readiness.test.ts src/main/daemon/session.test.ts src/main/daemon/shell-ready.test.ts src/main/providers/local-pty-shell-ready.test.ts src/main/providers/local-pty-provider.test.ts src/relay/pty-shell-launch.test.ts src/relay/pty-handler.test.ts",
+        "pnpm exec vitest run --config config/vitest.config.ts src/main/daemon/repro-13767-shell-ready-marker-lost-to-exec.test.ts src/main/line-editor-ready-output-scanner.test.ts src/main/shell-startup-identity-scanner.test.ts src/main/shell-startup-output-scanner.test.ts src/main/shell-prompt-readiness-probe.test.ts src/shared/pty-slave-line-discipline-echo.test.ts src/shared/shell-process-readiness.test.ts src/main/daemon/session.test.ts src/main/daemon/shell-ready.test.ts src/main/providers/local-pty-shell-ready.test.ts src/main/providers/local-pty-provider.test.ts src/relay/pty-shell-launch.test.ts src/relay/pty-handler.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts --maxWorkers=1 src/main/daemon/shell-ready.test.ts src/main/shell-startup-output-scanner.test.ts",
         "ORCA_E2E_SSH_DOCKER=1 SKIP_BUILD=1 pnpm exec playwright test tests/e2e/ssh-startup-exec-readiness.spec.ts --config tests/playwright.config.ts --project electron-headful --workers=1",
         "ORCA_E2E_WEB_CLIENT=1 SKIP_BUILD=1 pnpm exec playwright test tests/e2e/paired-startup-exec-readiness.spec.ts --config tests/playwright.config.ts --project electron-headless --project electron-headful --workers=1"
@@ -61,6 +69,7 @@
           "assertions": [
             "scalar and array PROMPT_COMMAND values accept trailing separators and whitespace",
             "escaped trailing spaces and semicolons remain byte-exact",
+            "BASH_REMATCH and chained DEBUG-trap command identity remain intact",
             "OSC 133 A/C/D lifecycle ordering and command exit status remain exact"
           ]
         },
@@ -133,10 +142,19 @@
           "date": "2026-08-12",
           "runner": "local",
           "platform": "macos",
-          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/daemon/repro-13767-shell-ready-marker-lost-to-exec.test.ts src/main/daemon/bash-prompt-command-composition.test.ts src/main/line-editor-ready-output-scanner.test.ts src/main/shell-startup-identity-scanner.test.ts src/main/shell-startup-output-scanner.test.ts src/main/shell-prompt-readiness-probe.test.ts src/shared/pty-slave-line-discipline-echo.test.ts src/shared/shell-process-readiness.test.ts src/main/daemon/session.test.ts src/main/daemon/shell-ready.test.ts src/main/providers/local-pty-shell-ready.test.ts src/main/providers/local-pty-provider.test.ts src/relay/pty-shell-launch.test.ts src/relay/pty-handler.test.ts",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/daemon/repro-13767-shell-ready-marker-lost-to-exec.test.ts src/main/line-editor-ready-output-scanner.test.ts src/main/shell-startup-identity-scanner.test.ts src/main/shell-startup-output-scanner.test.ts src/main/shell-prompt-readiness-probe.test.ts src/shared/pty-slave-line-discipline-echo.test.ts src/shared/shell-process-readiness.test.ts src/main/daemon/session.test.ts src/main/daemon/shell-ready.test.ts src/main/providers/local-pty-shell-ready.test.ts src/main/providers/local-pty-provider.test.ts src/relay/pty-shell-launch.test.ts src/relay/pty-handler.test.ts",
           "result": "passed",
           "durationSeconds": 6,
-          "summary": "486 tests passed with one local Fish skip, including Bash PROMPT_COMMAND composition, every-boundary scanner composition, real exec, silent-read, line-init-hook, renamed-image, disabled-bracketed-paste, and relay-owner oracles."
+          "summary": "473 tests passed with one local Fish skip, including every-boundary scanner composition, real exec, silent-read, line-init-hook, renamed-image, disabled-bracketed-paste, and relay-owner oracles."
+        },
+        {
+          "date": "2026-08-14",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/daemon/repro-13767-shell-ready-marker-lost-to-exec.test.ts src/main/daemon/bash-prompt-command-composition.test.ts src/main/line-editor-ready-output-scanner.test.ts src/main/shell-startup-identity-scanner.test.ts src/main/shell-startup-output-scanner.test.ts src/main/shell-prompt-readiness-probe.test.ts src/shared/pty-slave-line-discipline-echo.test.ts src/shared/shell-process-readiness.test.ts src/main/daemon/session.test.ts src/main/daemon/shell-ready.test.ts src/main/providers/local-pty-shell-ready.test.ts src/main/providers/local-pty-provider.test.ts src/relay/pty-shell-launch.test.ts src/relay/pty-handler.test.ts",
+          "result": "passed",
+          "durationSeconds": 7,
+          "summary": "499 tests passed with one local Fish skip, including exact Bash PROMPT_COMMAND byte/status/lifecycle composition across daemon, local, and relay owners."
         },
         {
           "date": "2026-08-12",

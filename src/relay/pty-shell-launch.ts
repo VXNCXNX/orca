@@ -165,6 +165,7 @@ __orca_osc133_precmd() {
     unset __orca_in_command
   fi
   printf "\\033]133;A\\007"
+  return "$exit_code"
 }
 __orca_osc133_prompt_done() {
   unset __orca_in_prompt_command
@@ -175,11 +176,21 @@ __orca_run_user_debug_trap() {
   fi
 }
 __orca_osc133_preexec() {
-  __orca_run_user_debug_trap
-  [[ -z "\${__orca_in_prompt_command:-}" ]] || return
-  case "$BASH_COMMAND" in
-    *__orca_osc133_precmd*|*__orca_osc133_prompt_done*) return ;;
+  if [[ -n "\${__orca_in_prompt_dispatch:-}" ]]; then
+    [[ -n "\${__orca_dispatching_user_prompt_command:-}" ]] || return 0
+    if [[ "\${FUNCNAME[1]:-}" == "__orca_run_prompt_command_array" ]]; then
+      case "$BASH_COMMAND" in
+        'eval "$__orca_prompt_part"'|'eval "$__orca_final_prompt_command"'|__orca_dispatching_user_prompt_command=*|__orca_osc133_precmd|__orca_osc133_prompt_done|__orca_prompt_mark) return 0 ;;
+      esac
+    fi
+  elif [[ "\${FUNCNAME[1]:-}" == "__orca_run_prompt_command_array" || "$BASH_COMMAND" == "__orca_run_prompt_command_array" ]]; then
+    return 0
+  fi
+  case "\${FUNCNAME[1]:-}:$BASH_COMMAND" in
+    __orca_osc133_*:*|__orca_prompt_mark:*|*:__orca_osc133_precmd|*:__orca_osc133_prompt_done|*:__orca_prompt_mark) return 0 ;;
   esac
+  __orca_run_user_debug_trap
+  [[ -z "\${__orca_in_prompt_command:-}" ]] || return 0
   printf "\\033]133;C\\007"
   __orca_in_command=1
 }
@@ -194,14 +205,19 @@ if [[ "\${ORCA_SHELL_READY_MARKER:-0}" == "1" ]]; then
   __orca_append_prompt_command "__orca_prompt_mark"
 fi
 __orca_append_prompt_command "__orca_osc133_prompt_done"
+__orca_had_functrace=""
+[[ -o functrace ]] && __orca_had_functrace=1
+set +T
 __orca_debug_trap_spec="$(trap -p DEBUG)"
+[[ -z "$__orca_had_functrace" ]] || set -T
 if [[ -n "$__orca_debug_trap_spec" ]]; then
   __orca_debug_trap_command="\${__orca_debug_trap_spec#trap -- }"
   __orca_debug_trap_command="\${__orca_debug_trap_command% DEBUG}"
   eval "__orca_user_debug_trap=$__orca_debug_trap_command"
 fi
-unset __orca_debug_trap_spec __orca_debug_trap_command
-unset -f __orca_normalize_prompt_command __orca_prepend_prompt_command __orca_append_prompt_command
+unset __orca_debug_trap_spec __orca_debug_trap_command __orca_had_functrace
+unset -f __orca_normalize_prompt_command_part __orca_normalize_prompt_command __orca_prepend_prompt_command __orca_append_prompt_command
+unset __orca_prompt_command_normalized
 # Why: arm DEBUG after wrapper setup so the relay rcfile itself does not emit
 # fake command-start/end markers before the first prompt.
 trap '__orca_osc133_preexec' DEBUG

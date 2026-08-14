@@ -140,6 +140,7 @@ __orca_osc133_precmd() {
   # so a framework that must be last in PROMPT_COMMAND — bash-preexec — is not
   # displaced by one of Orca's own hooks.
   [[ "\${ORCA_SHELL_READY_MARKER:-0}" == "1" ]] && printf "${SHELL_READY_MARKER}"
+  return "$exit_code"
 }
 __orca_run_user_debug_trap() {
   if [[ -n "\${__orca_user_debug_trap:-}" ]]; then
@@ -147,6 +148,19 @@ __orca_run_user_debug_trap() {
   fi
 }
 __orca_osc133_preexec() {
+  if [[ -n "\${__orca_in_prompt_dispatch:-}" ]]; then
+    [[ -n "\${__orca_dispatching_user_prompt_command:-}" ]] || return 0
+    if [[ "\${FUNCNAME[1]:-}" == "__orca_run_prompt_command_array" ]]; then
+      case "$BASH_COMMAND" in
+        'eval "$__orca_prompt_part"'|'eval "$__orca_final_prompt_command"'|__orca_dispatching_user_prompt_command=*|__orca_osc133_precmd|__orca_osc133_epilogue) return 0 ;;
+      esac
+    fi
+  elif [[ "\${FUNCNAME[1]:-}" == "__orca_run_prompt_command_array" || "$BASH_COMMAND" == "__orca_run_prompt_command_array" ]]; then
+    return 0
+  fi
+  case "\${FUNCNAME[1]:-}:$BASH_COMMAND" in
+    __orca_osc133_*:*|*:__orca_osc133_precmd|*:__orca_osc133_epilogue|__bp_*:*|*:__bp_*) return 0 ;;
+  esac
   __orca_run_user_debug_trap
   # Why: a framework (bash-preexec/starship) may replace our DEBUG trap at the
   # first prompt; __orca_osc133_epilogue re-takes it each prompt and stores the
@@ -155,14 +169,11 @@ __orca_osc133_preexec() {
   if [[ -n "\${__orca_chained_debug_trap:-}" ]]; then
     eval "$__orca_chained_debug_trap" || true
   fi
-  [[ -z "\${__orca_in_prompt_command:-}" ]] || return
+  [[ -z "\${__orca_in_prompt_command:-}" ]] || return 0
   # Why: a chained trap can invoke us more than once for a single command, so
   # emit C only on the first fire (the __orca_in_command gate), and never for a
   # prompt-time hook — ours or bash-preexec's __bp_* helpers.
-  [[ -z "\${__orca_in_command:-}" ]] || return
-  case "$BASH_COMMAND" in
-    *__orca_osc133_*|*__bp_*) return ;;
-  esac
+  [[ -z "\${__orca_in_command:-}" ]] || return 0
   printf "\\033]133;C\\007"
   __orca_in_command=1
 }
@@ -172,7 +183,11 @@ __orca_osc133_preexec() {
 # while its re-arm can no longer silence Orca's command-start signal.
 __orca_osc133_epilogue() {
   unset __orca_in_prompt_command
-  local __orca_spec="$(trap -p DEBUG)"
+  local __orca_spec __orca_had_functrace=""
+  [[ -o functrace ]] && __orca_had_functrace=1
+  set +T
+  __orca_spec="$(trap -p DEBUG)"
+  [[ -z "$__orca_had_functrace" ]] || set -T
   case "$__orca_spec" in
     "" | *__orca_osc133_preexec* ) __orca_chained_debug_trap="" ;;
     * )
@@ -186,14 +201,19 @@ __orca_osc133_epilogue() {
 ${BASH_PROMPT_COMMAND_COMPOSITION_BLOCK}
 __orca_prepend_prompt_command "__orca_osc133_precmd"
 __orca_append_prompt_command "__orca_osc133_epilogue"
+__orca_had_functrace=""
+[[ -o functrace ]] && __orca_had_functrace=1
+set +T
 __orca_debug_trap_spec="$(trap -p DEBUG)"
+[[ -z "$__orca_had_functrace" ]] || set -T
 if [[ -n "$__orca_debug_trap_spec" ]]; then
   __orca_debug_trap_command="\${__orca_debug_trap_spec#trap -- }"
   __orca_debug_trap_command="\${__orca_debug_trap_command% DEBUG}"
   eval "__orca_user_debug_trap=$__orca_debug_trap_command"
 fi
-unset __orca_debug_trap_spec __orca_debug_trap_command
-unset -f __orca_normalize_prompt_command __orca_prepend_prompt_command __orca_append_prompt_command
+unset __orca_debug_trap_spec __orca_debug_trap_command __orca_had_functrace
+unset -f __orca_normalize_prompt_command_part __orca_normalize_prompt_command __orca_prepend_prompt_command __orca_append_prompt_command
+unset __orca_prompt_command_normalized
 # Why: arm DEBUG after wrapper setup; otherwise bash treats our own rcfile
 # commands as a foreground command and emits a fake C/D before the first prompt.
 trap '__orca_osc133_preexec' DEBUG
