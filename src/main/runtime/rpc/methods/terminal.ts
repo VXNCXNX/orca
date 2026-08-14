@@ -1360,7 +1360,9 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
         params.enter === true &&
         params.interrupt !== true &&
         params.client?.type === 'desktop' &&
-        (await runtime.isTerminalRunningAgent(params.terminal))
+        (await runtime.isTerminalRunningAgent(params.terminal, {
+          retryForegroundWrappers: false
+        }))
       const reserveWrite =
         params.inputKind !== 'query-reply' && leaf?.ptyId && mobileFloorClientId
           ? (ptyId: string): void => {

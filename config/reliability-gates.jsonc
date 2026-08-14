@@ -8862,13 +8862,13 @@
       "providers": ["local", "daemon", "ssh", "remote-runtime"],
       "coveredPlatforms": ["macos", "windows"],
       "coveredProviders": ["local"],
-      "coverageNotes": "Source-built macOS and physical Windows Electron journeys cover the public CLI through RPC, runtime identity, real PTY/ConPTY writes, and a delayed fake Codex composer. Focused units cover CLI intent, recognized-agent routing, late foreground-agent identity, framing bytes, and exact direct-input fallback. SSH, daemon, remote-runtime, and live Cursor remain explicit gaps.",
+      "coverageNotes": "Source-built macOS and physical Windows Electron journeys cover the public CLI through RPC, runtime identity, real PTY/ConPTY writes, and a delayed fake Codex composer. Focused units enumerate every configured TUI agent, cover cursor-marker and generic output-quiescence policies, preserve an unidentified fresh-agent quiet window, and prove speculative CLI sends do not poll wrapper foregrounds. SSH, daemon, remote-runtime, and live non-marker agents remain explicit gaps.",
       "motivatingLinks": [
         "https://linear.app/stably/issue/STA-4328",
         "https://github.com/stablyai/orca/issues/14525"
       ],
       "invariant": "A public CLI send containing non-empty text plus Enter and no interrupt identifies agent-prompt intent. The owning runtime uses bracketed-paste and settled submit only when the exact target is a running recognized agent on a desktop call; shells, text-only input, bare Enter, interrupts, mobile input, query replies, and older clients keep the direct terminal contract.",
-      "oracle": "Launch a bare fake Codex through the real Electron PTY and delay its composer render for 1,200 ms, beyond the legacy generic 500 ms gap. Send a 557-byte prompt with the public CLI and require the marker, zero premature Enter, no rescue Enter, and one submission. POSIX child stdin must retain one bracketed-paste frame; Windows ConPTY consumes that control frame, so runtime tests require the frame at the PTY write boundary while the Windows child requires the exact prompt. The same harness against the installed pre-fix runtime must record one premature Enter and require one bare rescue Enter. Focused units require CLI intent only for text plus Enter, settled routing after recognized-agent confirmation even when launch metadata lags, and byte-for-byte direct fallback for a non-agent target.",
+      "oracle": "Launch a bare fake Codex through the real Electron PTY and delay its composer render for 1,200 ms, beyond the legacy generic 500 ms gap. Send a 557-byte prompt with the public CLI and require the marker, zero premature Enter, no rescue Enter, and one submission. POSIX child stdin must retain one bracketed-paste frame; Windows ConPTY consumes that control frame, so runtime tests require the frame at the PTY write boundary while the Windows child requires the exact prompt. The same harness against the installed pre-fix runtime must record one premature Enter and require one bare rescue Enter. Focused units require CLI intent only for text plus Enter, settled routing after recognized-agent confirmation, every configured TUI agent to wait for output quiescence, unidentified fresh prompts to wait 1.5 seconds, wrapper foregrounds to avoid speculative polling, and byte-for-byte direct fallback for a non-agent target.",
       "commands": [
         "pnpm exec vitest run --config config/vitest.config.ts src/cli/handlers/terminal.test.ts src/main/runtime/rpc/terminal-agent-prompt-send.test.ts src/main/runtime/rpc/terminal-send.test.ts src/main/runtime/orca-runtime.test.ts src/shared/agent-prompt-injection.test.ts",
         "pnpm run build:cli && pnpm exec playwright test tests/e2e/terminal-send-agent-prompt-submit.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
@@ -8902,7 +8902,9 @@
         {
           "file": "src/main/runtime/orca-runtime.test.ts",
           "assertions": [
-            "a foreground Codex discovered after terminal creation receives the render-settled policy",
+            "every configured TUI agent waits for composer output quiescence before submit",
+            "an unidentified silent fresh composer receives a full quiet window",
+            "a speculative CLI prompt check does not poll wrapper foregrounds",
             "the PTY write boundary retains bracketed framing and one delayed submit"
           ]
         },
@@ -8967,7 +8969,7 @@
       },
       "performanceBudget": {
         "required": true,
-        "evidence": "Only a CLI request with non-empty text plus Enter and no interrupt adds one existing bounded recognized-agent status evaluation. Confirmed agents reuse the existing O(prompt bytes) chunked prompt sender and render settlement gate; if launch identity has not arrived, that gate performs one existing foreground-process refresh before choosing timing. Non-agent CLI targets retain the existing 500 ms direct-send path. Text-only, bare Enter, interrupt, mobile, renderer stream input, and query replies add no work. No polling, provider listing, renderer wakeup, stream opcode, or recurring timer is added."
+        "evidence": "Only a CLI request with non-empty text plus Enter and no interrupt adds one recognized-agent status evaluation; this speculative path performs at most one foreground read and never enters the 6.5-second wrapper retry loop. Confirmed agents reuse the O(prompt bytes) chunked prompt sender plus one PTY-local listener: cursor-marker agents wait for post-marker quiescence, while every other recognized or metadata-late prompt waits for 1.5 seconds of output quiescence with an 8-second continuous-output bound. Non-agent CLI targets retain the existing 500 ms direct-send path. Text-only, bare Enter, interrupt, mobile, renderer stream input, and query replies add no work."
       },
       "promotionCriteria": [
         "Collect live Codex, Claude, and Cursor CLI sends on representative slow systems.",
@@ -8975,7 +8977,7 @@
       ],
       "knownGaps": [
         "Live SSH/daemon/remote-runtime evidence is not yet attached.",
-        "Cursor uses the existing platform-specific structured-prompt delay because no Cursor render-marker trace has been collected; Codex and Claude use output settlement.",
+        "Agents without a validated cursor marker use generic output quiescence plus the bounded silent fallback; live traces have not yet tuned that policy per agent.",
         "A new CLI talking to an old host safely loses the optional field and therefore keeps the old timing behavior until the host updates.",
         "The E2E fake agent models the submission race without requiring external agent authentication; live account-backed agents are covered separately."
       ],
@@ -8999,14 +9001,14 @@
       "providers": ["local", "daemon", "ssh", "remote-runtime"],
       "coveredPlatforms": ["macos"],
       "coveredProviders": ["local"],
-      "coverageNotes": "Local macOS evidence covers the runtime PTY write contract, live Codex orchestration, a dev-runtime CLI repro, and Claude and Codex composer traces. The render gate stays on the PTY-owning runtime, so paired and SSH callers use the same provider write/output path without a wire change. SSH, daemon, remote-runtime, Linux, and Windows live journeys remain gaps.",
+      "coverageNotes": "Local macOS evidence covers the runtime PTY write contract, live Codex orchestration, a dev-runtime CLI repro, Claude and Codex composer traces, and deterministic settlement for every configured TUI agent. The render gate stays on the PTY-owning runtime, so paired and SSH callers use the same provider write/output path without a wire change. SSH, daemon, remote-runtime, Linux, Windows, and live non-marker-agent journeys remain gaps.",
       "motivatingLinks": [
         "https://github.com/stablyai/orca/issues/7226",
         "https://github.com/stablyai/orca/issues/13821",
         "https://github.com/stablyai/orca/issues/14347"
       ],
-      "invariant": "Injected orchestration task prompts for recognized agent CLIs must send the prompt body inside one bracketed-paste frame, sanitize embedded ESC bytes, preserve chunk boundaries without losing the frame, and submit exactly once only after the agent can accept Enter. Claude and Codex must emit a post-paste composer marker and then settle, or reach the bounded fallback first; a late marker receives a fresh settlement window.",
-      "oracle": "Runtime tests assert the exact PTY write sequence, failure cleanup, and Claude- and Codex-shaped multi-frame renders where the legacy platform delay and first show-cursor marker are both premature. The candidate waits for post-marker output quiescence before one submit, resets that window on later frames, gives a late marker a fresh bounded window, and still submits once at the hard deadline if output never settles. Orchestration tests assert dispatch/coordinator use the agent prompt path; the live CLI harness covers long Codex-like framing.",
+      "invariant": "Injected orchestration task prompts for recognized agent CLIs must send the prompt body inside one bracketed-paste frame, sanitize embedded ESC bytes, preserve chunk boundaries without losing the frame, and submit exactly once only after the agent can accept Enter. Validated cursor-marker agents must observe their marker and then settle, while every other configured or metadata-late agent must receive a bounded output-quiescence window before submit.",
+      "oracle": "Runtime tests enumerate every configured TUI agent and assert the exact PTY write sequence, failure cleanup, marker-gated multi-frame renders, generic output quiescence, and an unidentified silent-composer fallback where the legacy 500 ms delay is premature. The candidate resets settlement on later frames, gives a late marker a fresh bounded window, and still submits once at the hard deadline if output never settles. Orchestration tests assert dispatch/coordinator use the agent prompt path; the live CLI harness covers long Codex-like framing.",
       "commands": [
         "pnpm exec vitest run --config config/vitest.config.ts src/shared/agent-prompt-injection.test.ts src/main/runtime/orca-runtime.test.ts src/main/runtime/rpc/methods/orchestration.test.ts src/main/runtime/orchestration/coordinator.test.ts",
         "node tests/tools/repro-orchestration-long-prompt.mjs --cli out/bin/orca-dev --mode codex-like --size-kb 32 --timeout-ms 20000"
@@ -9032,7 +9034,9 @@
           "file": "src/main/runtime/orca-runtime.test.ts",
           "assertions": [
             "runtime writes bracketed paste before a delayed submit",
-            "Claude and Codex ignore unrelated and split pre-marker output, then wait for post-marker render quiescence before one submit",
+            "every configured TUI agent waits for output quiescence before one submit",
+            "validated marker agents ignore unrelated and split pre-marker output",
+            "an unidentified silent composer waits for the generic quiet fallback",
             "a late Codex marker receives a fresh settlement window before one submit",
             "a silent Claude composer reaches one bounded fallback submit",
             "a marked Claude composer with continuous render output reaches one bounded fallback submit",
@@ -9125,7 +9129,7 @@
       },
       "performanceBudget": {
         "required": true,
-        "evidence": "Agent prompt dispatch remains O(prompt bytes) with existing 16KB chunking. Claude and Codex add one PTY-local output listener until 1.5s of post-marker output quiescence or an 8s fallback; a late first marker restarts the bounded window and each later frame resets one quiet timer. Other agents retain the platform delay. No polling, provider listing, subprocess churn, hidden-pane wakeups, renderer work, or wire traffic is added."
+        "evidence": "Agent prompt dispatch remains O(prompt bytes) with existing 16KB chunking. Every prompt adds one PTY-local output listener until 1.5 seconds of output quiescence or the bounded fallback; validated cursor-marker agents begin quiescence after their marker, and each later frame resets one quiet timer. No polling, provider listing, subprocess churn, hidden-pane wakeups, renderer work, or wire traffic is added."
       },
       "promotionCriteria": [
         "Run the live harness in soak with a self-starting dev runtime or provider-contract fixture.",

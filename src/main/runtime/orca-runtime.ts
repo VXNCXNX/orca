@@ -94,7 +94,6 @@ import {
 import {
   AGENT_PROMPT_BRACKETED_PASTE_END,
   AGENT_PROMPT_SUBMIT,
-  AGENT_PROMPT_SUBMIT_DELAY_MS,
   buildAgentPromptPasteBytes
 } from '../../shared/agent-prompt-injection'
 import {
@@ -1866,7 +1865,7 @@ const BRACKETED_PASTE_QUIET_MS = 1500
 const DRAFT_PASTE_READY_TIMEOUT_MS = 8000
 const AGENT_PROMPT_RENDER_TIMEOUT_MS = 8000
 const AGENT_PROMPT_RENDER_QUIET_MS = 1500
-// Why: Claude and Codex emit show-cursor while rendering pasted composer content.
+// Why: validated composers emit show-cursor after accepting bracketed paste.
 const AGENT_PROMPT_RENDER_MARKER = '\x1b[?25h'
 const MOBILE_TERMINAL_SURFACE_TIMEOUT_MS = 10_000
 // Why: the split already failed; the caller waits on this teardown only to learn whether the
@@ -17557,7 +17556,7 @@ export class OrcaRuntimeService {
       suffixFailureError?: string
     } = {}
   ): Promise<void> {
-    const renderGate = await this.createAgentPromptRenderGate(ptyId)
+    const renderGate = this.createAgentPromptRenderGate(ptyId)
     let wrotePasteBytes = false
     let completedPaste = false
     try {
@@ -17567,7 +17566,7 @@ export class OrcaRuntimeService {
         const nextChunk = chunks.next()
         await options.beforeWrite?.(ptyId)
         if (nextChunk.done) {
-          renderGate?.arm()
+          renderGate.arm()
         }
         const wrote = this.ptyController?.write(ptyId, chunk.value) ?? false
         if (!wrote) {
@@ -17584,16 +17583,12 @@ export class OrcaRuntimeService {
       if (wrotePasteBytes && !completedPaste) {
         this.ptyController?.write(ptyId, AGENT_PROMPT_BRACKETED_PASTE_END)
       }
-      renderGate?.dispose()
+      renderGate.dispose()
       throw error
     }
 
-    if (renderGate) {
-      await renderGate.wait()
-      renderGate.dispose()
-    } else {
-      await new Promise((resolve) => setTimeout(resolve, AGENT_PROMPT_SUBMIT_DELAY_MS))
-    }
+    await renderGate.wait()
+    renderGate.dispose()
     try {
       await options.beforeWrite?.(ptyId)
     } catch (error) {
@@ -17608,22 +17603,20 @@ export class OrcaRuntimeService {
     }
   }
 
-  private async createAgentPromptRenderGate(ptyId: string): Promise<{
+  private createAgentPromptRenderGate(ptyId: string): {
     arm: () => void
     wait: () => Promise<void>
     dispose: () => void
-  } | null> {
-    let pty = this.ptysById.get(ptyId)
-    if (pty && !pty.launchAgent && pty.foregroundAgent === null) {
-      await this.refreshPtyForegroundAgentFromController(ptyId)
-      pty = this.ptysById.get(ptyId)
-    }
+  } {
+    const pty = this.ptysById.get(ptyId)
     const agent = pty?.launchAgent ?? pty?.foregroundAgent
-    if (agent !== 'claude' && agent !== 'codex') {
-      return null
-    }
+    const readySignal = agent ? TUI_AGENT_CONFIG[agent].draftPasteReadySignal : undefined
+    const requiresRenderMarker =
+      agent === 'claude' ||
+      agent === 'codex' ||
+      readySignal === 'render-cursor-after-bracketed-paste'
     let armed = false
-    let observedMarker = false
+    let canSettle = !requiresRenderMarker
     let settled = false
     let markerCarry = ''
     let quietTimer: NodeJS.Timeout | null = null
@@ -17664,13 +17657,13 @@ export class OrcaRuntimeService {
       if (!armed || settled) {
         return
       }
-      if (!observedMarker) {
+      if (!canSettle) {
         const combined = markerCarry + data
         markerCarry = combined.slice(-(AGENT_PROMPT_RENDER_MARKER.length - 1))
         if (!combined.includes(AGENT_PROMPT_RENDER_MARKER)) {
           return
         }
-        observedMarker = true
+        canSettle = true
         // Why: a slow initial redraw must still receive the full settlement window.
         armHardTimer()
       }
@@ -17680,13 +17673,14 @@ export class OrcaRuntimeService {
       arm: () => {
         armed = true
         markerCarry = ''
+        armHardTimer()
+        if (canSettle) {
+          armQuietTimer()
+        }
       },
       wait: async () => {
         if (settled) {
           return
-        }
-        if (!hardTimer) {
-          armHardTimer()
         }
         await rendered
       },
@@ -32184,12 +32178,15 @@ export class OrcaRuntimeService {
   }
 
   // Why: title is the tightest agent-presence signal, but a Claude management title is negative evidence for task activity.
-  async isTerminalRunningAgent(handle: string): Promise<boolean> {
+  async isTerminalRunningAgent(
+    handle: string,
+    options: { retryForegroundWrappers?: boolean } = {}
+  ): Promise<boolean> {
     try {
       const pty = this.getLivePtyForHandle(handle)
       if (pty) {
         const leaf = this.getPrimaryLeafForPty(pty.pty.ptyId)
-        return await this.isPtyRunningAgent(pty.pty, leaf)
+        return await this.isPtyRunningAgent(pty.pty, leaf, options)
       }
       const { leaf } = this.getLiveLeafForHandle(handle)
       const trackedPty = leaf.ptyId ? this.ptysById.get(leaf.ptyId) : null
@@ -32240,7 +32237,8 @@ export class OrcaRuntimeService {
       }
       // Why: review-note delivery auto-submits with Enter, so only known agent processes are safe (not arbitrary focused TUIs).
       return await this.isRecognizedForegroundAgentProcess(leaf.ptyId, fg, {
-        suppressClaude: shouldSuppressClaudeForeground
+        suppressClaude: shouldSuppressClaudeForeground,
+        retryWrappers: options.retryForegroundWrappers !== false
       })
     } catch {
       return false
@@ -32249,7 +32247,8 @@ export class OrcaRuntimeService {
 
   private async isPtyRunningAgent(
     pty: RuntimePtyWorktreeRecord,
-    leaf: RuntimeLeafRecord | null = null
+    leaf: RuntimeLeafRecord | null = null,
+    options: { retryForegroundWrappers?: boolean } = {}
   ): Promise<boolean> {
     const leafTitle = leaf
       ? getLatestAgentCandidateTitle(
@@ -32308,14 +32307,15 @@ export class OrcaRuntimeService {
     }
     // Why: review-note delivery auto-submits with Enter, so only known agent processes are safe (not arbitrary focused TUIs).
     return await this.isRecognizedForegroundAgentProcess(pty.ptyId, fg, {
-      suppressClaude: shouldSuppressClaudeForeground
+      suppressClaude: shouldSuppressClaudeForeground,
+      retryWrappers: options.retryForegroundWrappers !== false
     })
   }
 
   private async isRecognizedForegroundAgentProcess(
     ptyId: string,
     foregroundProcess: string,
-    options: { suppressClaude?: boolean } = {}
+    options: { suppressClaude?: boolean; retryWrappers?: boolean } = {}
   ): Promise<boolean> {
     const initialRecognition = recognizeAgentProcess(foregroundProcess)
     if (initialRecognition !== null) {
@@ -32324,7 +32324,11 @@ export class OrcaRuntimeService {
         isExpectedAgentProcess(initialRecognition.processName, 'claude')
       )
     }
-    if (!this.isAgentWrapperForegroundProcess(foregroundProcess) || !this.ptyController) {
+    if (
+      options.retryWrappers === false ||
+      !this.isAgentWrapperForegroundProcess(foregroundProcess) ||
+      !this.ptyController
+    ) {
       return false
     }
     const startedAt = Date.now()
