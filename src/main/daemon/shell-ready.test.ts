@@ -668,13 +668,11 @@ describePosix('daemon shell-ready launch config', () => {
     expect(bashRc).toContain('printf "\\033]133;D;%s\\007"')
     expect(bashRc).toContain('printf "\\033]777;orca-shell-start:%s\\007" "$$"')
     expect(bashRc).toContain('printf "\\033]133;C\\007"')
-    // precmd is prepended (captures $? first), epilogue appended last, so a framework needing last position stays between them.
-    expect(bashRc).toContain(
-      'PROMPT_COMMAND="__orca_osc133_precmd${PROMPT_COMMAND:+;${PROMPT_COMMAND}};__orca_osc133_epilogue"'
-    )
+    expect(bashRc).toContain('__orca_prepend_prompt_command "__orca_osc133_precmd"')
+    expect(bashRc).toContain('__orca_append_prompt_command "__orca_osc133_epilogue"')
     // DEBUG is armed after PROMPT_COMMAND setup so rcfile commands aren't seen as foreground; lastIndexOf skips the epilogue's re-arm.
     expect(bashRc.lastIndexOf("trap '__orca_osc133_preexec' DEBUG")).toBeGreaterThan(
-      bashRc.indexOf('PROMPT_COMMAND="__orca_osc133_precmd')
+      bashRc.indexOf('__orca_append_prompt_command "__orca_osc133_epilogue"')
     )
     expect(zshrc).toContain('printf "\\033]133;D;%s\\007"')
     expect(zshrc).toContain('printf "\\033]133;C\\007"')
@@ -783,29 +781,13 @@ describePosix('daemon shell-ready launch config', () => {
     const { getDaemonBashShellReadyRcfileContent } = await importFreshShellReady()
     writeFileSync(
       join(userDataPath, '.bash_profile'),
-      'PROMPT_COMMAND=(\'AFTER_ARRAY_PROMPT=1; printf "PROMPT_ARRAY\\n"\')\n'
+      'PROMPT_COMMAND=(\'printf "PROMPT_ARRAY_A\\n"\' \'printf "PROMPT_ARRAY_B\\n";  \')\n'
     )
 
     const output = runInteractiveBashRcfile(getDaemonBashShellReadyRcfileContent(), userDataPath)
 
-    expect(output).toContain('PROMPT_ARRAY')
-    expectBashOsc133Lifecycle(output)
-  })
-
-  itWithBash('trims a trailing separator so the append cannot form ";;"', async () => {
-    // Why: `zoxide init bash` leaves "__zoxide_hook;" when PROMPT_COMMAND was empty, and
-    // appending ";__orca_osc133_epilogue" to that makes bash reject the whole PROMPT_COMMAND,
-    // which silently takes the OSC 133 markers down with it.
-    const { getDaemonBashShellReadyRcfileContent } = await importFreshShellReady()
-    writeFileSync(
-      join(userDataPath, '.bash_profile'),
-      'PROMPT_COMMAND=\'AFTER_TRAILING_PROMPT=1; printf "PROMPT_TRAILING\\n";\'\n'
-    )
-
-    const output = runInteractiveBashRcfile(getDaemonBashShellReadyRcfileContent(), userDataPath)
-
-    expect(output).not.toContain('syntax error')
-    expect(output).toContain('PROMPT_TRAILING')
+    expect(output.split('PROMPT_ARRAY_A')).toHaveLength(4)
+    expect(output.split('PROMPT_ARRAY_B')).toHaveLength(4)
     expectBashOsc133Lifecycle(output)
   })
 

@@ -247,12 +247,13 @@ describe('getRelayShellLaunchConfig', () => {
   itWithBash('normalizes relay bash array PROMPT_COMMAND hooks', () => {
     writeFileSync(
       join(homeDir, '.bash_profile'),
-      'PROMPT_COMMAND=(\'AFTER_ARRAY_PROMPT=1; printf "PROMPT_ARRAY\\n"\')\n'
+      'PROMPT_COMMAND=(\'printf "PROMPT_ARRAY_A\\n"\' \'printf "PROMPT_ARRAY_B\\n";  \')\n'
     )
     const config = getRelayShellLaunchConfig('/bin/bash', { HOME: homeDir })
     const output = runInteractiveBashRcfile(config.args[1] as string, homeDir)
 
-    expect(output).toContain('PROMPT_ARRAY')
+    expect(output.split('PROMPT_ARRAY_A')).toHaveLength(4)
+    expect(output.split('PROMPT_ARRAY_B')).toHaveLength(4)
     expectBashOsc133Lifecycle(output)
   })
 

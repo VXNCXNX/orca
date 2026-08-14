@@ -16,6 +16,7 @@ import {
   getPosixCodexShellLaunchPreflight
 } from '../pty/codex-shell-launch-preflight'
 import {
+  BASH_PROMPT_COMMAND_COMPOSITION_BLOCK,
   getFishShellReadyInitCommand,
   getZshEnvTemplate,
   getZshFinalZdotdirRestoreBlock,
@@ -182,30 +183,9 @@ __orca_osc133_epilogue() {
   esac
   trap '__orca_osc133_preexec' DEBUG
 }
-# Why: normalize an array PROMPT_COMMAND (bash 5.1+) to a string so prepend/append
-# below is uniform, and capture $? in precmd before the user's chain mutates it.
-__orca_normalize_prompt_command() {
-  local __orca_joined="" __orca_prompt_part
-  if [[ "$(declare -p PROMPT_COMMAND 2>/dev/null)" == "declare -a"* ]]; then
-    for __orca_prompt_part in "\${PROMPT_COMMAND[@]}"; do
-      [[ -n "$__orca_prompt_part" ]] || continue
-      if [[ -n "$__orca_joined" ]]; then
-        __orca_joined="$__orca_joined;$__orca_prompt_part"
-      else
-        __orca_joined="$__orca_prompt_part"
-      fi
-    done
-    PROMPT_COMMAND="$__orca_joined"
-  fi
-  # Why: an integration such as zoxide, or a RHEL-family /etc/bashrc, can leave
-  # PROMPT_COMMAND ending in a ";"/whitespace separator; trim it so the append
-  # below never forms ";;", which bash rejects for the whole PROMPT_COMMAND.
-  while [[ "\${PROMPT_COMMAND:-}" == *[[:space:]\\;] ]]; do
-    PROMPT_COMMAND="\${PROMPT_COMMAND%?}"
-  done
-}
-__orca_normalize_prompt_command
-PROMPT_COMMAND="__orca_osc133_precmd\${PROMPT_COMMAND:+;\${PROMPT_COMMAND}};__orca_osc133_epilogue"
+${BASH_PROMPT_COMMAND_COMPOSITION_BLOCK}
+__orca_prepend_prompt_command "__orca_osc133_precmd"
+__orca_append_prompt_command "__orca_osc133_epilogue"
 __orca_debug_trap_spec="$(trap -p DEBUG)"
 if [[ -n "$__orca_debug_trap_spec" ]]; then
   __orca_debug_trap_command="\${__orca_debug_trap_spec#trap -- }"
@@ -213,7 +193,7 @@ if [[ -n "$__orca_debug_trap_spec" ]]; then
   eval "__orca_user_debug_trap=$__orca_debug_trap_command"
 fi
 unset __orca_debug_trap_spec __orca_debug_trap_command
-unset -f __orca_normalize_prompt_command
+unset -f __orca_normalize_prompt_command __orca_prepend_prompt_command __orca_append_prompt_command
 # Why: arm DEBUG after wrapper setup; otherwise bash treats our own rcfile
 # commands as a foreground command and emits a fake C/D before the first prompt.
 trap '__orca_osc133_preexec' DEBUG

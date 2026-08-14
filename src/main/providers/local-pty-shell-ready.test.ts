@@ -567,9 +567,7 @@ describePosix('local PTY shell-ready launch config', () => {
     // The exact escape sequences terminal-command-lifecycle parses (133;D = finished, 133;C = start).
     expect(bashRc).toContain('printf "\\033]133;D;%s\\007"')
     expect(bashRc).toContain('printf "\\033]133;C\\007"')
-    expect(bashRc).toContain(
-      'PROMPT_COMMAND="__orca_osc133_precmd${PROMPT_COMMAND:+;${PROMPT_COMMAND}}"'
-    )
+    expect(bashRc).toContain('__orca_prepend_prompt_command "__orca_osc133_precmd"')
     expect(bashRc.indexOf("trap '__orca_osc133_preexec' DEBUG")).toBeGreaterThan(
       bashRc.indexOf('if [[ "${ORCA_SHELL_READY_MARKER:-0}" == "1" ]]; then')
     )
@@ -610,12 +608,27 @@ describePosix('local PTY shell-ready launch config', () => {
     const { getBashShellReadyRcfileContent } = await importFreshLocalPtyShellReady()
     writeFileSync(
       join(userDataPath, '.bash_profile'),
-      'PROMPT_COMMAND=(\'AFTER_ARRAY_PROMPT=1; printf "PROMPT_ARRAY\\n"\')\n'
+      'PROMPT_COMMAND=(\'printf "PROMPT_ARRAY_A\\n"\' \'printf "PROMPT_ARRAY_B\\n";  \')\n'
     )
 
     const output = runInteractiveBashRcfile(getBashShellReadyRcfileContent(), userDataPath)
 
-    expect(output).toContain('PROMPT_ARRAY')
+    expect(output.split('PROMPT_ARRAY_A')).toHaveLength(4)
+    expect(output.split('PROMPT_ARRAY_B')).toHaveLength(4)
+    expectBashOsc133Lifecycle(output)
+  })
+
+  itWithBash('composes an inherited PROMPT_COMMAND ending in separators', async () => {
+    const { getBashShellReadyRcfileContent } = await importFreshLocalPtyShellReady()
+    writeFileSync(
+      join(userDataPath, '.bash_profile'),
+      'PROMPT_COMMAND=\'printf "PROMPT_SEPARATOR\\n"; ;\t\n;;  \'\n'
+    )
+
+    const output = runInteractiveBashRcfile(getBashShellReadyRcfileContent(), userDataPath)
+
+    expect(output).not.toContain('syntax error')
+    expect(output).toContain('PROMPT_SEPARATOR')
     expectBashOsc133Lifecycle(output)
   })
 

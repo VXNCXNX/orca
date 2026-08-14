@@ -21,6 +21,7 @@ import {
 } from '../pty/codex-shell-launch-preflight'
 import { buildStartupCommandSubmission } from '../../shared/startup-command-submission'
 import {
+  BASH_PROMPT_COMMAND_COMPOSITION_BLOCK,
   getFishShellReadyInitCommand,
   getZshEnvTemplate,
   getZshFinalZdotdirRestoreBlock,
@@ -165,34 +166,8 @@ __orca_osc133_preexec() {
   __orca_in_command=1
 }
 # Why: prepend so we capture $? before the user's PROMPT_COMMAND chain mutates it.
-__orca_normalize_prompt_command() {
-  local __orca_joined="" __orca_prompt_part
-  if [[ "$(declare -p PROMPT_COMMAND 2>/dev/null)" == "declare -a"* ]]; then
-    for __orca_prompt_part in "\${PROMPT_COMMAND[@]}"; do
-      [[ -n "$__orca_prompt_part" ]] || continue
-      if [[ -n "$__orca_joined" ]]; then
-        __orca_joined="$__orca_joined;$__orca_prompt_part"
-      else
-        __orca_joined="$__orca_prompt_part"
-      fi
-    done
-    PROMPT_COMMAND="$__orca_joined"
-  fi
-}
-__orca_prepend_prompt_command() {
-  __orca_normalize_prompt_command
-  PROMPT_COMMAND="__orca_osc133_precmd\${PROMPT_COMMAND:+;\${PROMPT_COMMAND}}"
-}
-__orca_append_prompt_command() {
-  local command="$1"
-  __orca_normalize_prompt_command
-  if [[ -n "\${PROMPT_COMMAND:-}" ]]; then
-    PROMPT_COMMAND="\${PROMPT_COMMAND};$command"
-  else
-    PROMPT_COMMAND="$command"
-  fi
-}
-__orca_prepend_prompt_command
+${BASH_PROMPT_COMMAND_COMPOSITION_BLOCK}
+__orca_prepend_prompt_command "__orca_osc133_precmd"
 # Why: append the marker through PROMPT_COMMAND so it fires after the login
 # startup files have rebuilt the prompt, without re-running user rc files.
 if [[ "\${ORCA_SHELL_READY_MARKER:-0}" == "1" ]]; then

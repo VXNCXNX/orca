@@ -10,6 +10,58 @@ export const SHELL_STARTUP_IDENTITY_MARKER_BLOCK = `if [[ "\${ORCA_SHELL_STARTUP
   printf "\\033]777;orca-shell-start:%s\\007" "$$"
 fi`
 
+// Why: daemon, local, and relay wrappers must preserve one Bash prompt-hook contract.
+export const BASH_PROMPT_COMMAND_COMPOSITION_BLOCK = `__orca_normalize_prompt_command() {
+  local __orca_joined="" __orca_prompt_part __orca_candidate __orca_trailing_backslashes
+  if [[ "$(declare -p PROMPT_COMMAND 2>/dev/null)" == "declare -a"* ]]; then
+    for __orca_prompt_part in "\${PROMPT_COMMAND[@]}"; do
+      while [[ "$__orca_prompt_part" == *[[:space:]\\;] ]]; do
+        __orca_candidate="\${__orca_prompt_part%?}"
+        __orca_trailing_backslashes="\${__orca_candidate##*[!\\\\]}"
+        # An odd backslash run makes the trailing separator part of the command.
+        (( \${#__orca_trailing_backslashes} % 2 == 0 )) || break
+        __orca_prompt_part="$__orca_candidate"
+      done
+      [[ -n "$__orca_prompt_part" ]] || continue
+      if [[ -n "$__orca_joined" ]]; then
+        __orca_joined="$__orca_joined
+$__orca_prompt_part"
+      else
+        __orca_joined="$__orca_prompt_part"
+      fi
+    done
+    # Assignment alone preserves the array type and its higher indices.
+    unset PROMPT_COMMAND
+    PROMPT_COMMAND="$__orca_joined"
+  fi
+  while [[ "\${PROMPT_COMMAND:-}" == *[[:space:]\\;] ]]; do
+    __orca_candidate="\${PROMPT_COMMAND%?}"
+    __orca_trailing_backslashes="\${__orca_candidate##*[!\\\\]}"
+    (( \${#__orca_trailing_backslashes} % 2 == 0 )) || break
+    PROMPT_COMMAND="$__orca_candidate"
+  done
+}
+__orca_prepend_prompt_command() {
+  local command="$1"
+  __orca_normalize_prompt_command
+  if [[ -n "\${PROMPT_COMMAND:-}" ]]; then
+    PROMPT_COMMAND="$command
+\${PROMPT_COMMAND}"
+  else
+    PROMPT_COMMAND="$command"
+  fi
+}
+__orca_append_prompt_command() {
+  local command="$1"
+  __orca_normalize_prompt_command
+  if [[ -n "\${PROMPT_COMMAND:-}" ]]; then
+    PROMPT_COMMAND="\${PROMPT_COMMAND}
+$command"
+  else
+    PROMPT_COMMAND="$command"
+  fi
+}`
+
 export function getZshEnvTemplate(zshDir: string, headerPrefix = ''): string {
   const header = headerPrefix
     ? `Orca ${headerPrefix} zsh shell-ready wrapper`

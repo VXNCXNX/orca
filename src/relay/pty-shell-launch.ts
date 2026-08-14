@@ -3,6 +3,7 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { getPosixOmpShellWrapper } from '../main/pty/omp-shell-wrapper'
 import {
+  BASH_PROMPT_COMMAND_COMPOSITION_BLOCK,
   getZshFinalZdotdirRestoreBlock,
   getZshShellReadyMarkerRegistrationBlock,
   SHELL_STARTUP_IDENTITY_MARKER_BLOCK,
@@ -182,39 +183,8 @@ __orca_osc133_preexec() {
   printf "\\033]133;C\\007"
   __orca_in_command=1
 }
-__orca_normalize_prompt_command() {
-  local __orca_joined="" __orca_prompt_part
-  if [[ "$(declare -p PROMPT_COMMAND 2>/dev/null)" == "declare -a"* ]]; then
-    for __orca_prompt_part in "\${PROMPT_COMMAND[@]}"; do
-      [[ -n "$__orca_prompt_part" ]] || continue
-      if [[ -n "$__orca_joined" ]]; then
-        __orca_joined="$__orca_joined;$__orca_prompt_part"
-      else
-        __orca_joined="$__orca_prompt_part"
-      fi
-    done
-    PROMPT_COMMAND="$__orca_joined"
-  fi
-  # Why: RHEL-family /etc/bashrc can leave an inherited PROMPT_COMMAND ending in
-  # a ";"/whitespace separator; trim it so Orca's prepend/append never form ";;".
-  while [[ "\${PROMPT_COMMAND:-}" == *[[:space:]\\;] ]]; do
-    PROMPT_COMMAND="\${PROMPT_COMMAND%?}"
-  done
-}
-__orca_prepend_prompt_command() {
-  __orca_normalize_prompt_command
-  PROMPT_COMMAND="__orca_osc133_precmd\${PROMPT_COMMAND:+;\${PROMPT_COMMAND}}"
-}
-__orca_append_prompt_command() {
-  local command="$1"
-  __orca_normalize_prompt_command
-  if [[ -n "\${PROMPT_COMMAND:-}" ]]; then
-    PROMPT_COMMAND="\${PROMPT_COMMAND};$command"
-  else
-    PROMPT_COMMAND="$command"
-  fi
-}
-__orca_prepend_prompt_command
+${BASH_PROMPT_COMMAND_COMPOSITION_BLOCK}
+__orca_prepend_prompt_command "__orca_osc133_precmd"
 # Why: SSH startup commands are renderer-delivered; emit the same internal
 # readiness marker as local shells only when that delivery mode asks for it.
 if [[ "\${ORCA_SHELL_READY_MARKER:-0}" == "1" ]]; then
