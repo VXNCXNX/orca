@@ -17557,7 +17557,7 @@ export class OrcaRuntimeService {
       suffixFailureError?: string
     } = {}
   ): Promise<void> {
-    const renderGate = this.createAgentPromptRenderGate(ptyId)
+    const renderGate = await this.createAgentPromptRenderGate(ptyId)
     let wrotePasteBytes = false
     let completedPaste = false
     try {
@@ -17608,12 +17608,16 @@ export class OrcaRuntimeService {
     }
   }
 
-  private createAgentPromptRenderGate(ptyId: string): {
+  private async createAgentPromptRenderGate(ptyId: string): Promise<{
     arm: () => void
     wait: () => Promise<void>
     dispose: () => void
-  } | null {
-    const pty = this.ptysById.get(ptyId)
+  } | null> {
+    let pty = this.ptysById.get(ptyId)
+    if (pty && !pty.launchAgent && pty.foregroundAgent === null) {
+      await this.refreshPtyForegroundAgentFromController(ptyId)
+      pty = this.ptysById.get(ptyId)
+    }
     const agent = pty?.launchAgent ?? pty?.foregroundAgent
     if (agent !== 'claude' && agent !== 'codex') {
       return null

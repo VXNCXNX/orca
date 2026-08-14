@@ -16703,6 +16703,44 @@ describe('OrcaRuntimeService', () => {
     }
   )
 
+  it('settles a foreground Codex prompt when launch metadata has not arrived', async () => {
+    vi.useFakeTimers()
+    try {
+      const writes: string[] = []
+      let composerReady = false
+      const runtime = new OrcaRuntimeService(store)
+      runtime.setPtyController({
+        spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
+        write: (_ptyId, data) => {
+          writes.push(data)
+          if (data.includes(AGENT_PROMPT_BRACKETED_PASTE_END)) {
+            setTimeout(() => {
+              composerReady = true
+              runtime.onPtyData('pty-bg', '\x1b[?25hcomposer rendered', Date.now())
+            }, 1_200)
+          }
+          return true
+        },
+        kill: () => true,
+        getForegroundProcess: async () => 'codex'
+      })
+      const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`)
+
+      const sendPromise = runtime.sendTerminalAgentPrompt(handle, 'review this change')
+      await vi.advanceTimersByTimeAsync(1_199)
+      expect(writes).not.toContain('\r')
+      await vi.advanceTimersByTimeAsync(1_500)
+      expect(writes).not.toContain('\r')
+      await vi.advanceTimersByTimeAsync(1)
+      await sendPromise
+
+      expect(composerReady).toBe(true)
+      expect(writes.filter((data) => data === '\r')).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('submits a silent Claude composer once after the bounded render fallback', async () => {
     vi.useFakeTimers()
     try {

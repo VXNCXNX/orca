@@ -8845,6 +8845,143 @@
       "demotionRule": "Keep non-blocking or demote to protection none if a generic busy title authorizes without exact title, verified-launch, or foreground identity; provider confirmation becomes unconditional; exact-PTY mismatch can write bytes; unsupported providers fail open; or the focused gate flakes without an actionable product or harness defect."
     },
     {
+      "id": "terminal-input.cli-agent-prompt-submit",
+      "title": "CLI text plus Enter settles recognized agent composers before submit",
+      "maturity": "experimental",
+      "protection": "partial",
+      "owner": "terminal-input",
+      "layer": "cli-rpc-runtime-pty-contract",
+      "surfaces": [
+        "terminal send CLI",
+        "terminal.send RPC",
+        "agent prompt injection",
+        "PTY writes",
+        "bracketed paste"
+      ],
+      "platforms": ["macos", "linux", "windows"],
+      "providers": ["local", "daemon", "ssh", "remote-runtime"],
+      "coveredPlatforms": ["macos", "windows"],
+      "coveredProviders": ["local"],
+      "coverageNotes": "Source-built macOS and physical Windows Electron journeys cover the public CLI through RPC, runtime identity, real PTY/ConPTY writes, and a delayed fake Codex composer. Focused units cover CLI intent, recognized-agent routing, late foreground-agent identity, framing bytes, and exact direct-input fallback. SSH, daemon, remote-runtime, and live Cursor remain explicit gaps.",
+      "motivatingLinks": [
+        "https://linear.app/stably/issue/STA-4328",
+        "https://github.com/stablyai/orca/issues/14525"
+      ],
+      "invariant": "A public CLI send containing non-empty text plus Enter and no interrupt identifies agent-prompt intent. The owning runtime uses bracketed-paste and settled submit only when the exact target is a running recognized agent on a desktop call; shells, text-only input, bare Enter, interrupts, mobile input, query replies, and older clients keep the direct terminal contract.",
+      "oracle": "Launch a bare fake Codex through the real Electron PTY and delay its composer render for 1,200 ms, beyond the legacy generic 500 ms gap. Send a 557-byte prompt with the public CLI and require the marker, zero premature Enter, no rescue Enter, and one submission. POSIX child stdin must retain one bracketed-paste frame; Windows ConPTY consumes that control frame, so runtime tests require the frame at the PTY write boundary while the Windows child requires the exact prompt. The same harness against the installed pre-fix runtime must record one premature Enter and require one bare rescue Enter. Focused units require CLI intent only for text plus Enter, settled routing after recognized-agent confirmation even when launch metadata lags, and byte-for-byte direct fallback for a non-agent target.",
+      "commands": [
+        "pnpm exec vitest run --config config/vitest.config.ts src/cli/handlers/terminal.test.ts src/main/runtime/rpc/terminal-agent-prompt-send.test.ts src/main/runtime/rpc/terminal-send.test.ts src/main/runtime/orca-runtime.test.ts src/shared/agent-prompt-injection.test.ts",
+        "pnpm run build:cli && pnpm exec playwright test tests/e2e/terminal-send-agent-prompt-submit.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
+        "pnpm.cmd exec playwright test tests/e2e/terminal-send-agent-prompt-submit.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
+        "node tests/tools/repro-terminal-send-submit.mjs --cli orca --worktree <registered-worktree> --discard-report"
+      ],
+      "testFiles": [
+        "src/cli/handlers/terminal.test.ts",
+        "src/main/runtime/rpc/terminal-agent-prompt-send.test.ts",
+        "src/main/runtime/rpc/terminal-send.test.ts",
+        "src/main/runtime/orca-runtime.test.ts",
+        "src/shared/agent-prompt-injection.test.ts",
+        "tests/e2e/terminal-send-agent-prompt-submit.spec.ts",
+        "tests/tools/repro-terminal-send-submit.mjs"
+      ],
+      "assertionRefs": [
+        {
+          "file": "src/cli/handlers/terminal.test.ts",
+          "assertions": [
+            "combined text and Enter carries explicit agent-prompt intent",
+            "text-only and bare Enter remain direct terminal input"
+          ]
+        },
+        {
+          "file": "src/main/runtime/rpc/terminal-agent-prompt-send.test.ts",
+          "assertions": [
+            "a recognized desktop agent uses settled prompt delivery",
+            "a non-agent target preserves the existing direct send"
+          ]
+        },
+        {
+          "file": "src/main/runtime/orca-runtime.test.ts",
+          "assertions": [
+            "a foreground Codex discovered after terminal creation receives the render-settled policy",
+            "the PTY write boundary retains bracketed framing and one delayed submit"
+          ]
+        },
+        {
+          "file": "tests/e2e/terminal-send-agent-prompt-submit.spec.ts",
+          "assertions": [
+            "the public source-built CLI submits after a delayed composer render without rescue",
+            "the fake agent receives the marker and zero premature Enter on macOS and Windows",
+            "POSIX preserves one bracketed-paste frame while Windows validates the ConPTY-observable payload"
+          ]
+        }
+      ],
+      "evidenceRuns": [
+        {
+          "date": "2026-08-14",
+          "runner": "local",
+          "platform": "macos",
+          "command": "node tests/tools/repro-terminal-send-submit.mjs --cli orca --worktree <registered-worktree> --discard-report",
+          "result": "failed",
+          "durationSeconds": 5.46,
+          "summary": "The installed pre-fix runtime received all 567 prompt bytes but no bracketed-paste frame; Enter arrived before the 1,200 ms composer render and one later bare Enter was required."
+        },
+        {
+          "date": "2026-08-14",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm run build:cli && pnpm exec playwright test tests/e2e/terminal-send-agent-prompt-submit.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
+          "result": "passed",
+          "durationSeconds": 38.5,
+          "summary": "Two independent final source-built CLI/RPC/runtime/PTY journeys passed with one bracketed-paste frame, zero premature Enter, and no rescue send (36.5s and 38.5s)."
+        },
+        {
+          "date": "2026-08-14",
+          "runner": "manual",
+          "platform": "windows",
+          "command": "pnpm.cmd exec playwright test tests/e2e/terminal-send-agent-prompt-submit.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
+          "result": "passed",
+          "durationSeconds": 47.6,
+          "summary": "Two independent physical Windows source-built Electron/CLI/ConPTY journeys passed at cf814f2f46 with the prompt marker received, zero premature Enter, and no rescue send (47.6s and 47.1s)."
+        },
+        {
+          "date": "2026-08-14",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/cli/handlers/terminal.test.ts src/main/runtime/rpc/terminal-agent-prompt-send.test.ts src/main/runtime/rpc/terminal-send.test.ts src/main/runtime/orca-runtime.test.ts src/shared/agent-prompt-injection.test.ts",
+          "result": "passed",
+          "durationSeconds": 73.06,
+          "summary": "The final focused runtime/CLI/RPC suite passed 1,158 tests with one skip, including the new foreground-Codex metadata-lag contract."
+        }
+      ],
+      "runtimeBudget": {
+        "p95Seconds": 90,
+        "scope": "focused units plus one isolated Electron CLI/PTY journey"
+      },
+      "flakeHistory": {
+        "status": "unknown",
+        "evidence": "The final oracle passed twice in independent macOS app launches and twice on physical Windows. A shared --repeat-each fixture mode failed before test execution because only one seeded worktree loaded; supported isolated invocations were used for product evidence. CI history is not yet collected."
+      },
+      "redGreenEvidence": {
+        "status": "partial",
+        "evidence": "The fake-composer oracle was red against the installed pre-fix runtime with prematureEnters=1 and rescueSent=true. It also caught a source-built late-identity race with a complete paste frame but one premature Enter before the render gate began resolving foreground identity. The final candidate is green on macOS and Windows with prematureEnters=0 and rescueSent=false."
+      },
+      "performanceBudget": {
+        "required": true,
+        "evidence": "Only a CLI request with non-empty text plus Enter and no interrupt adds one existing bounded recognized-agent status evaluation. Confirmed agents reuse the existing O(prompt bytes) chunked prompt sender and render settlement gate; if launch identity has not arrived, that gate performs one existing foreground-process refresh before choosing timing. Non-agent CLI targets retain the existing 500 ms direct-send path. Text-only, bare Enter, interrupt, mobile, renderer stream input, and query replies add no work. No polling, provider listing, renderer wakeup, stream opcode, or recurring timer is added."
+      },
+      "promotionCriteria": [
+        "Collect live Codex, Claude, and Cursor CLI sends on representative slow systems.",
+        "Retain mixed-version evidence that old hosts strip the optional intent and new hosts accept old clients without a protocol bump."
+      ],
+      "knownGaps": [
+        "Live SSH/daemon/remote-runtime evidence is not yet attached.",
+        "Cursor uses the existing platform-specific structured-prompt delay because no Cursor render-marker trace has been collected; Codex and Claude use output settlement.",
+        "A new CLI talking to an old host safely loses the optional field and therefore keeps the old timing behavior until the host updates.",
+        "The E2E fake agent models the submission race without requiring external agent authentication; live account-backed agents are covered separately."
+      ],
+      "demotionRule": "Keep experimental or demote to protection none if direct shell/mobile/query input is reframed, an unrecognized target receives bracketed paste, a prompt can emit duplicate Enter, mixed-version decoding rejects the optional field, or the deterministic fake-composer candidate requires a rescue send."
+    },
+    {
       "id": "terminal-input.agent-prompt-injection",
       "title": "Orchestration agent prompts arrive as bracketed paste before submit",
       "maturity": "experimental",
