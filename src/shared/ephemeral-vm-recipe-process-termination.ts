@@ -69,7 +69,7 @@ function terminateWindowsRecipeProcess(
     const onClose = (exitCode: number | null): void => finish(exitCode === 0)
     const onCancel = (): void => {
       stopTreeKiller()
-      finish(false)
+      finish(false, false)
     }
     const stopTreeKiller = (): void => {
       killer.removeListener('error', onError)
@@ -77,7 +77,7 @@ function terminateWindowsRecipeProcess(
       killer.kill('SIGKILL')
       killer.unref()
     }
-    const finish = (confirmed: boolean): void => {
+    const finish = (confirmed: boolean, killChild = true): void => {
       if (settled) {
         return
       }
@@ -86,7 +86,7 @@ function terminateWindowsRecipeProcess(
       killer.removeListener('error', onError)
       killer.removeListener('close', onClose)
       treeKillerCancelSignal?.removeEventListener('abort', onCancel)
-      if (!confirmed) {
+      if (!confirmed && killChild) {
         child.kill(signal)
       }
       resolve(confirmed)

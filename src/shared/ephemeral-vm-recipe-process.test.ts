@@ -315,6 +315,7 @@ describe('runRecipeCommand', () => {
         windowsHide: true,
         stdio: 'ignore'
       })
+      expect(child.kill).not.toHaveBeenCalled()
       forceKiller.emit('close', 0, null)
       await expect(resultPromise).resolves.toMatchObject({ aborted: true })
     } finally {
