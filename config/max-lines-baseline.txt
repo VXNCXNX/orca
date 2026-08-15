@@ -15,16 +15,11 @@ inline src/main/automations/hermes-cron-output.ts
 inline src/main/browser/agent-browser-bridge.test.ts
 inline src/main/browser/agent-browser-bridge.ts
 inline src/main/browser/browser-cookie-import.ts
-inline src/main/browser/browser-guest-ui.ts
 inline src/main/browser/browser-manager-grab.test.ts
 inline src/main/browser/browser-manager.test.ts
 inline src/main/browser/browser-manager.ts
-inline src/main/browser/browser-screencast-stream.ts
-inline src/main/browser/browser-session-registry.ts
 inline src/main/browser/cdp-bridge.ts
-inline src/main/browser/cdp-ws-proxy.ts
 inline src/main/browser/grab-guest-script.ts
-inline src/main/browser/snapshot-engine.ts
 inline src/main/claude-accounts/runtime-auth-service.test.ts
 inline src/main/claude-accounts/runtime-auth-service.ts
 inline src/main/claude-accounts/service.test.ts
@@ -80,7 +75,6 @@ inline src/main/hermes/hook-service.ts
 inline src/main/hooks.test.ts
 inline src/main/hooks.ts
 inline src/main/index.ts
-inline src/main/ipc/browser.ts
 inline src/main/ipc/crash-reporting.ts
 inline src/main/ipc/filesystem-auth.ts
 inline src/main/ipc/filesystem-mutations.ts

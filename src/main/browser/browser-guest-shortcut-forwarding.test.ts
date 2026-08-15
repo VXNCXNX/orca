@@ -11,10 +11,10 @@ vi.mock('electron', () => ({
 
 import {
   resolveGuestMouseWheelZoomDirection,
-  setupGuestContextMenu,
-  setupGuestMouseWheelZoomForwarding,
-  setupGuestShortcutForwarding
-} from './browser-guest-ui'
+  setupGuestMouseWheelZoomForwarding
+} from './browser-guest-wheel-zoom'
+import { setupGuestContextMenu } from './browser-guest-context-menu'
+import { setupGuestShortcutForwarding } from './browser-guest-shortcut-forwarding'
 
 describe('setupGuestContextMenu', () => {
   const browserTabId = 'tab-1'
