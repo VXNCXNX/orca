@@ -30,8 +30,8 @@ export function terminateRecipeProcess(
       return force
         ? waitForPosixProcessGroupExit(child.pid)
         : Promise.resolve(!isPosixProcessGroupAlive(child.pid))
-    } catch {
-      // The direct child is the only remaining identity after its group is gone.
+    } catch (error) {
+      return Promise.resolve(isProcessNotFoundError(error))
     }
   }
   child.kill(signal)

@@ -97,6 +97,16 @@ describe('terminateRecipeProcess', () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
+  it('treats initial POSIX ESRCH as group absence without a PID fallback', async () => {
+    const child = makeChild(128)
+    vi.spyOn(process, 'kill').mockImplementation(() => {
+      throw Object.assign(new Error('gone'), { code: 'ESRCH' })
+    })
+
+    await expect(terminateRecipeProcess(child as never, true)).resolves.toBe(true)
+    expect(child.kill).not.toHaveBeenCalled()
+  })
+
   it('rejects a Windows PID that exited before a deadline takeover', async () => {
     const restorePlatform = setProcessPlatform('win32')
     const child = makeChild(125)

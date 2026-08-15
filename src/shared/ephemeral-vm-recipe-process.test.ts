@@ -301,10 +301,10 @@ describe('runRecipeCommand', () => {
 
       stopController.abort()
       child.emit('exit', null, 'SIGTERM')
+      child.emit('close', null, 'SIGTERM')
       deadlineController.abort()
       expect(spawnTreeKiller).toHaveBeenCalledOnce()
 
-      gracefulKiller.emit('close', 1, null)
       await expect(resultPromise).resolves.toMatchObject({
         aborted: true,
         terminationFailed: true

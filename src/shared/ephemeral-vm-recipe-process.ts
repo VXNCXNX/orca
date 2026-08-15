@@ -122,7 +122,7 @@ export async function runRecipeCommand(args: {
         return
       }
       aborted = true
-      if (hasRecipeProcessExited(child, processExited) && !processClosed) {
+      if (hasRecipeProcessExited(child, processExited)) {
         finishUnconfirmedExitedProcess()
         return
       }
