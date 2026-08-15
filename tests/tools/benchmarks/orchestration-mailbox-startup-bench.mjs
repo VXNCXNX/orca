@@ -163,6 +163,9 @@ function terminateProcessTree(child) {
   if (child.exitCode !== null || child.signalCode !== null) {
     return Promise.resolve()
   }
+  if (child.pid === undefined) {
+    return Promise.reject(new Error('Electron process ID is unavailable'))
+  }
   return new Promise((resolvePromise, reject) => {
     const timeout = setTimeout(
       () => reject(new Error('Electron did not terminate after startup measurement')),
@@ -179,12 +182,17 @@ function terminateProcessTree(child) {
       if (result.error) {
         clearTimeout(timeout)
         reject(result.error)
+      } else if (result.status !== 0 && child.exitCode === null && child.signalCode === null) {
+        clearTimeout(timeout)
+        reject(new Error(`taskkill failed with status ${result.status}`))
       }
       return
     }
-    if (!child.kill('SIGKILL')) {
+    try {
+      process.kill(-child.pid, 'SIGKILL')
+    } catch (error) {
       clearTimeout(timeout)
-      reject(new Error('Failed to signal Electron for termination'))
+      reject(error)
     }
   })
 }
@@ -194,6 +202,7 @@ function launchElectron(profilePath) {
     const homePath = join(profilePath, 'home')
     mkdirSync(homePath, { recursive: true })
     const child = spawn(require('electron'), [repoRoot], {
+      detached: process.platform !== 'win32',
       env: {
         ...process.env,
         HOME: homePath,
