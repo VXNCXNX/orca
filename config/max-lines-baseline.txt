@@ -66,7 +66,6 @@ inline src/main/git/worktree.test.ts
 inline src/main/git/worktree.ts
 inline src/main/github/client.test.ts
 inline src/main/github/client.ts
-inline src/main/github/issues.ts
 inline src/main/github/pr-refresh-coordinator.test.ts
 inline src/main/github/pr-refresh-coordinator.ts
 inline src/main/github/project-view.ts
@@ -74,8 +73,6 @@ inline src/main/github/project-view/mutations.ts
 inline src/main/github/work-item-details.ts
 inline src/main/gitlab/client-mr.test.ts
 inline src/main/gitlab/client.ts
-inline src/main/gitlab/issues.ts
-inline src/main/gitlab/work-item-details.ts
 inline src/main/hermes/hook-service.ts
 inline src/main/hooks.test.ts
 inline src/main/hooks.ts
@@ -89,8 +86,6 @@ inline src/main/ipc/filesystem.test.ts
 inline src/main/ipc/filesystem.ts
 inline src/main/ipc/github.test.ts
 inline src/main/ipc/github.ts
-inline src/main/ipc/gitlab.ts
-inline src/main/ipc/linear.ts
 inline src/main/ipc/notifications.test.ts
 inline src/main/ipc/notifications.ts
 inline src/main/ipc/pet.ts
@@ -106,10 +101,8 @@ inline src/main/ipc/ssh.ts
 inline src/main/ipc/worktree-remote.ts
 inline src/main/ipc/worktrees.test.ts
 inline src/main/ipc/worktrees.ts
-inline src/main/jira/client.ts
 inline src/main/jira/issues.ts
 inline src/main/keybindings/keybinding-file.ts
-inline src/main/linear/client.ts
 inline src/main/linear/issues.ts
 inline src/main/linear/projects.ts
 inline src/main/memory/collector.ts
@@ -314,7 +307,6 @@ inline src/shared/agent-hook-listener.ts
 inline src/shared/automation-schedules.ts
 inline src/shared/commit-message-agent-spec.ts
 inline src/shared/constants.ts
-inline src/shared/github/project-types.ts
 inline src/shared/keybindings.test.ts
 inline src/shared/keybindings.ts
 inline src/shared/marine-creatures.ts
