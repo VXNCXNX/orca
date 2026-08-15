@@ -13,11 +13,21 @@ function hasColumns(db: SyncDatabase, table: string, required: readonly string[]
 }
 
 function hasDispatchTaskIndex(db: SyncDatabase): boolean {
-  return Boolean(
-    db
-      .prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND name = ?")
-      .get('dispatch_contexts', DISPATCH_TASK_INDEX)
-  )
+  const index = (
+    db.prepare('PRAGMA index_list(dispatch_contexts)').all() as {
+      name?: string
+      partial?: number
+    }[]
+  ).find((row) => row.name === DISPATCH_TASK_INDEX)
+  if (!index || index.partial !== 0) {
+    return false
+  }
+  return (
+    db.prepare(`PRAGMA index_info(${DISPATCH_TASK_INDEX})`).all() as {
+      seqno?: number
+      name?: string
+    }[]
+  ).some((row) => row.seqno === 0 && row.name === 'task_id')
 }
 
 function hasDispatchTable(db: SyncDatabase): boolean {

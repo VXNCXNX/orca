@@ -2773,6 +2773,7 @@ export class OrcaRuntimeService {
   private managedHookReconciliationTail: Promise<void> = Promise.resolve()
   private readonly orchestrationEnvironmentTransport: OrchestrationEnvironmentTransport | null
   private readonly getOrchestrationDbPathFn: () => string
+  private orchestrationLineageHydrationInFlight: Promise<void> | null = null
   private readonly orchestrationFederationTimers = new Map<string, ReturnType<typeof setInterval>>()
   private orchestrationTerminalHistoryRecoveryTimer: ReturnType<typeof setTimeout> | null = null
   private orchestrationTerminalHistoryRecoveryInFlight: Promise<void> | null = null
@@ -3991,6 +3992,7 @@ export class OrcaRuntimeService {
       this.ensureOrchestrationFederationRelay()
       this.scheduleRestoredMessageRepoints()
       this.scheduleRequestedWorkerTerminalReleaseReconciliation()
+      this.scheduleOrchestrationLineageHydration()
       this.notifier?.orchestrationReady?.()
     }
     return this._orchestrationDb
@@ -4010,6 +4012,16 @@ export class OrcaRuntimeService {
     }
     void reconcileRequestedWorkerTerminalReleases(this).catch((error) => {
       console.warn('[orchestration] worker terminal release reconciliation failed', { error })
+    })
+  }
+
+  private scheduleOrchestrationLineageHydration(): void {
+    const inFlight = this.orchestrationLineageHydrationInFlight
+    const hydration = inFlight
+      ? inFlight.then(() => this.hydrateInferredWorktreeLineage())
+      : this.hydrateInferredWorktreeLineage()
+    void hydration.catch((error) => {
+      console.warn('[orchestration] readiness lineage hydration failed', { error })
     })
   }
 
@@ -29686,6 +29698,21 @@ export class OrcaRuntimeService {
   }
 
   async hydrateInferredWorktreeLineage(): Promise<void> {
+    if (this.orchestrationLineageHydrationInFlight) {
+      return await this.orchestrationLineageHydrationInFlight
+    }
+    const hydration = this.hydrateInferredWorktreeLineageOnce()
+    this.orchestrationLineageHydrationInFlight = hydration
+    try {
+      await hydration
+    } finally {
+      if (this.orchestrationLineageHydrationInFlight === hydration) {
+        this.orchestrationLineageHydrationInFlight = null
+      }
+    }
+  }
+
+  private async hydrateInferredWorktreeLineageOnce(): Promise<void> {
     const store = this.store
     if (
       !store ||
@@ -29709,6 +29736,7 @@ export class OrcaRuntimeService {
       return [{ taskId, worktree, worktreeInstanceId: worktree.instanceId }]
     })
     let passiveHandles: ReadonlyMap<string, string> | null = null
+    const changedRepoIds = new Set<string>()
     if (!this._orchestrationDb) {
       try {
         passiveHandles = readOrchestrationTaskLineageHandles(
@@ -29747,6 +29775,10 @@ export class OrcaRuntimeService {
         taskId,
         createdAt: Date.now()
       })
+      changedRepoIds.add(getRepoIdFromWorktreeId(worktree.id))
+    }
+    for (const repoId of changedRepoIds) {
+      this.notifyWorktreesChanged(repoId)
     }
   }
 

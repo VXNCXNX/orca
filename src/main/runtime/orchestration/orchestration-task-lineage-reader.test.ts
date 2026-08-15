@@ -75,7 +75,14 @@ describe('orchestration task lineage reader', () => {
     }
   })
 
-  it('defers lineage when an existing dispatch table cannot be queried by index', () => {
+  it.each([
+    ['missing', ''],
+    ['wrong-column', 'CREATE INDEX idx_dispatch_task ON dispatch_contexts(assignee_handle);'],
+    [
+      'partial',
+      'CREATE INDEX idx_dispatch_task ON dispatch_contexts(task_id) WHERE assignee_handle IS NOT NULL;'
+    ]
+  ])('defers lineage when the dispatch index is %s', (_case, indexSql) => {
     const dbPath = databasePath()
     const db = new SyncDatabase(dbPath)
     db.exec(`
@@ -88,12 +95,30 @@ describe('orchestration task lineage reader', () => {
         task_id TEXT NOT NULL,
         assignee_handle TEXT
       );
+      ${indexSql}
       INSERT INTO tasks VALUES ('task_creator', 'term_creator');
       INSERT INTO dispatch_contexts VALUES ('ctx', 'task_creator', 'term_worker');
     `)
     db.close()
 
     expect(readOrchestrationTaskLineageHandles(dbPath, ['task_creator'])).toEqual(new Map())
+  })
+
+  it('uses creator lineage when the dispatch table does not exist', () => {
+    const dbPath = databasePath()
+    const db = new SyncDatabase(dbPath)
+    db.exec(`
+      CREATE TABLE tasks (
+        id TEXT PRIMARY KEY,
+        created_by_terminal_handle TEXT
+      );
+      INSERT INTO tasks VALUES ('task_creator', 'term_creator');
+    `)
+    db.close()
+
+    expect(
+      Object.fromEntries(readOrchestrationTaskLineageHandles(dbPath, ['task_creator']))
+    ).toEqual({ task_creator: 'term_creator' })
   })
 
   it('returns no handles for missing databases or empty requests', () => {
