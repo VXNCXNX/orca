@@ -75,7 +75,7 @@ describe('orchestration task lineage reader', () => {
     }
   })
 
-  it('skips incompatible dispatch scans while retaining primary-key task fallback', () => {
+  it('defers lineage when an existing dispatch table cannot be queried by index', () => {
     const dbPath = databasePath()
     const db = new SyncDatabase(dbPath)
     db.exec(`
@@ -93,9 +93,7 @@ describe('orchestration task lineage reader', () => {
     `)
     db.close()
 
-    expect(
-      Object.fromEntries(readOrchestrationTaskLineageHandles(dbPath, ['task_creator']))
-    ).toEqual({ task_creator: 'term_creator' })
+    expect(readOrchestrationTaskLineageHandles(dbPath, ['task_creator'])).toEqual(new Map())
   })
 
   it('returns no handles for missing databases or empty requests', () => {

@@ -42995,6 +42995,15 @@ describe('OrcaRuntimeService', () => {
         origin: 'orchestration'
       })
     )
+    delete lineageById[childId]
+    setWorktreeLineage.mockClear()
+    const partialSchema = new SyncDatabase(dbPath)
+    partialSchema.exec('DROP INDEX idx_dispatch_task')
+    partialSchema.close()
+
+    await runtime.hydrateInferredWorktreeLineage()
+
+    expect(setWorktreeLineage).not.toHaveBeenCalled()
     expect(runtime.syncWindowGraph(1, { tabs: [], leaves: [] }).agentOrchestrationReady).toBe(false)
     const inspection = new SyncDatabase(dbPath, { readonly: true, fileMustExist: true })
     try {

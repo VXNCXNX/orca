@@ -20,6 +20,14 @@ function hasDispatchTaskIndex(db: SyncDatabase): boolean {
   )
 }
 
+function hasDispatchTable(db: SyncDatabase): boolean {
+  return Boolean(
+    db
+      .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")
+      .get('dispatch_contexts')
+  )
+}
+
 export function readOrchestrationTaskLineageHandles(
   dbPath: string,
   taskIds: readonly string[]
@@ -36,9 +44,13 @@ export function readOrchestrationTaskLineageHandles(
   })
   try {
     db.pragma('query_only = ON')
+    const dispatchTableExists = hasDispatchTable(db)
     const dispatchReadable =
       hasColumns(db, 'dispatch_contexts', ['task_id', 'assignee_handle']) &&
       hasDispatchTaskIndex(db)
+    if (dispatchTableExists && !dispatchReadable) {
+      return handles
+    }
     const taskReadable = hasColumns(db, 'tasks', ['id', 'created_by_terminal_handle'])
     const dispatchStatement = dispatchReadable
       ? db.prepare(
