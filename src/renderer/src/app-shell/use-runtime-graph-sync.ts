@@ -21,6 +21,8 @@ export function useRuntimeGraphSync(): void {
     }
   }, [])
 
+  useEffect(() => window.api.runtime.onOrchestrationReady?.(scheduleRuntimeGraphSync), [])
+
   useEffect(() => {
     let previousKey = getRuntimeMobileSessionSyncKey(useAppStore.getState())
     return useAppStore.subscribe((state, previousState) => {

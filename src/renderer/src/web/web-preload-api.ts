@@ -1428,6 +1428,7 @@ function createRuntimeApi(): NonNullable<Partial<PreloadApi>['runtime']> {
     onTerminalFitOverrideChanged: () => noopUnsubscribe,
     onTerminalDriverChanged: () => noopUnsubscribe,
     onNativeChatLaunchDraftResolved: () => noopUnsubscribe,
+    onOrchestrationReady: () => noopUnsubscribe,
     onBrowserDriverChanged: () => noopUnsubscribe
   }
 }

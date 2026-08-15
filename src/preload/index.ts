@@ -4395,6 +4395,11 @@ const api = {
       ipcRenderer.on('runtime:nativeChatLaunchDraftResolved', listener)
       return () => ipcRenderer.removeListener('runtime:nativeChatLaunchDraftResolved', listener)
     },
+    onOrchestrationReady: (callback: () => void): (() => void) => {
+      const listener = (): void => callback()
+      ipcRenderer.on('runtime:orchestrationReady', listener)
+      return () => ipcRenderer.removeListener('runtime:orchestrationReady', listener)
+    },
     onBrowserDriverChanged: (
       callback: (event: { browserPageId: string; driver: RuntimeBrowserDriverState }) => void
     ): (() => void) => {

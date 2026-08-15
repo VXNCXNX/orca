@@ -11,7 +11,7 @@ import {
   OrchestrationDb
 } from './db'
 import { readLegacyWorkerTerminalRecoveryRows } from './orchestration-legacy-worker-recovery-reader'
-import { hasRequestedWorkerTerminalReleaseBacklog } from './orchestration-worker-terminal-release-reader'
+import { requiresWorkerTerminalReleaseReadiness } from './orchestration-worker-terminal-release-reader'
 
 const MAILBOX_INDEXES = [
   'idx_messages_undelivered_direct_run',
@@ -192,8 +192,23 @@ describe('legacy worker recovery reader', () => {
 
   it('keeps startup recovery outside the full schema readiness gate', async () => {
     const { dbPath, dispatchId } = createRecoveryFixture()
+    const orchestrationReady = vi.fn()
     const runtime = new OrcaRuntimeService(null, undefined, {
       getOrchestrationDbPath: () => dbPath
+    })
+    runtime.setNotifier({
+      orchestrationReady,
+      worktreesChanged: vi.fn(),
+      reposChanged: vi.fn(),
+      activateWorktree: vi.fn(),
+      createTerminal: vi.fn(),
+      splitTerminal: vi.fn(),
+      renameTerminal: vi.fn(),
+      focusTerminal: vi.fn(),
+      closeTerminal: vi.fn(),
+      sleepWorktree: vi.fn(),
+      terminalFitOverrideChanged: vi.fn(),
+      terminalDriverChanged: vi.fn()
     })
 
     expect(runtime.prepareLegacyWorkerTerminalRecovery().candidates).toEqual([
@@ -202,12 +217,16 @@ describe('legacy worker recovery reader', () => {
     expect(countMailboxIndexes(dbPath)).toBe(0)
 
     expect(runtime.syncWindowGraph(1, { tabs: [], leaves: [] }).agentOrchestrationReady).toBe(false)
+    expect(orchestrationReady).not.toHaveBeenCalled()
     expect(countMailboxIndexes(dbPath)).toBe(0)
     await runtime.reconcileLegacyWorkerTerminals()
     expect(countMailboxIndexes(dbPath)).toBe(0)
 
     const db = runtime.getOrchestrationDb()
     try {
+      expect(orchestrationReady).toHaveBeenCalledTimes(1)
+      runtime.getOrchestrationDb()
+      expect(orchestrationReady).toHaveBeenCalledTimes(1)
       expect(countMailboxIndexes(dbPath)).toBe(MAILBOX_INDEXES.length)
       expect(runtime.syncWindowGraph(1, { tabs: [], leaves: [] }).agentOrchestrationReady).toBe(
         true
@@ -234,7 +253,7 @@ describe('legacy worker recovery reader', () => {
     `)
     raw.close()
 
-    expect(hasRequestedWorkerTerminalReleaseBacklog(dbPath)).toBe(true)
+    expect(requiresWorkerTerminalReleaseReadiness(dbPath)).toBe(true)
     const runtime = new OrcaRuntimeService(null, undefined, {
       getOrchestrationDbPath: () => dbPath
     })
@@ -246,12 +265,56 @@ describe('legacy worker recovery reader', () => {
     warn.mockRestore()
   })
 
-  it('treats pre-release-resource schemas as no release backlog', () => {
+  it('treats schemas without release resources as no release readiness work', () => {
     const dbPath = tempDatabasePath()
     const db = new SyncDatabase(dbPath)
-    db.exec('CREATE TABLE worker_terminal_resources (release_state TEXT NOT NULL)')
+    db.exec('CREATE TABLE tasks (id TEXT PRIMARY KEY)')
     db.close()
 
-    expect(hasRequestedWorkerTerminalReleaseBacklog(dbPath)).toBe(false)
+    expect(requiresWorkerTerminalReleaseReadiness(dbPath)).toBe(false)
+  })
+
+  it('opens readiness to repair a missing release index', async () => {
+    const dbPath = tempDatabasePath()
+    const fixture = new OrchestrationDb(dbPath)
+    fixture.close()
+    const raw = new SyncDatabase(dbPath)
+    raw.exec('DROP INDEX idx_worker_terminal_resources_release')
+    raw.exec(`
+      INSERT INTO worker_terminal_resources (
+        id, origin_dispatch_id, owner_dispatch_id, terminal_handle,
+        ownership_state, release_state
+      ) VALUES ('wtr_missing_index', 'dispatch_missing_index', 'dispatch_missing_index',
+                'term_missing_index', 'owned', 'requested')
+    `)
+    for (const name of MAILBOX_INDEXES) {
+      raw.exec(`DROP INDEX IF EXISTS ${name}`)
+    }
+    raw.close()
+
+    expect(requiresWorkerTerminalReleaseReadiness(dbPath)).toBe(true)
+    const runtime = new OrcaRuntimeService(null, undefined, {
+      getOrchestrationDbPath: () => dbPath
+    })
+    await runtime.reconcileLegacyWorkerTerminals()
+
+    expect(countMailboxIndexes(dbPath)).toBe(MAILBOX_INDEXES.length)
+    const ready = runtime.getOrchestrationDb()
+    try {
+      const inspection = new SyncDatabase(dbPath, { readonly: true, fileMustExist: true })
+      try {
+        expect(
+          inspection
+            .prepare(
+              "SELECT 1 AS found FROM sqlite_master WHERE type = 'index' AND name = 'idx_worker_terminal_resources_release'"
+            )
+            .get()
+        ).toEqual({ found: 1 })
+      } finally {
+        inspection.close()
+      }
+    } finally {
+      ready.close()
+    }
   })
 })

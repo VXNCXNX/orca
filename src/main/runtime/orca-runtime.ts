@@ -133,7 +133,8 @@ import {
   type LegacyWorkerTerminalRecoveryPlan
 } from './orchestration/orchestration-legacy-worker-terminal-recovery'
 import { readLegacyWorkerTerminalRecoveryRows } from './orchestration/orchestration-legacy-worker-recovery-reader'
-import { hasRequestedWorkerTerminalReleaseBacklog } from './orchestration/orchestration-worker-terminal-release-reader'
+import { requiresWorkerTerminalReleaseReadiness } from './orchestration/orchestration-worker-terminal-release-reader'
+import { readOrchestrationTaskLineageHandles } from './orchestration/orchestration-task-lineage-reader'
 import {
   buildObservedSetupCommand,
   createSetupCompletionScanner
@@ -1932,6 +1933,7 @@ function resolveTerminalPresentation(opts: {
 }
 
 type RuntimeNotifier = {
+  orchestrationReady?(): void
   worktreesChanged(repoId: string, renamed?: { oldWorktreeId: string; newWorktreeId: string }): void
   worktreeBaseStatus?(event: WorktreeBaseStatusEvent): void
   worktreeRemoteBranchConflict?(event: WorktreeRemoteBranchConflictEvent): void
@@ -3989,6 +3991,7 @@ export class OrcaRuntimeService {
       this.ensureOrchestrationFederationRelay()
       this.scheduleRestoredMessageRepoints()
       this.scheduleRequestedWorkerTerminalReleaseReconciliation()
+      this.notifier?.orchestrationReady?.()
     }
     return this._orchestrationDb
   }
@@ -3996,7 +3999,7 @@ export class OrcaRuntimeService {
   private scheduleRequestedWorkerTerminalReleaseReconciliation(): void {
     if (!this._orchestrationDb) {
       try {
-        if (!hasRequestedWorkerTerminalReleaseBacklog(this.getOrchestrationDbPathFn())) {
+        if (!requiresWorkerTerminalReleaseReadiness(this.getOrchestrationDbPathFn())) {
           return
         }
         this.getOrchestrationDb()
@@ -4011,11 +4014,15 @@ export class OrcaRuntimeService {
   }
 
   setOrchestrationDb(db: OrchestrationDb): void {
+    const becameReady = this._orchestrationDb === null
     this.stopOrchestrationFederationRelay()
     this.mailPointerRepointScheduler.clear()
     this._orchestrationDb = db
     this.ensureOrchestrationFederationRelay()
     this.scheduleRestoredMessageRepoints()
+    if (becameReady) {
+      this.notifier?.orchestrationReady?.()
+    }
   }
 
   private getLegacyWorkerTerminalRecoveryPlan(): LegacyWorkerTerminalRecoveryPlan {
@@ -29506,9 +29513,17 @@ export class OrcaRuntimeService {
 
     const commentTaskId = extractOrchestrationTaskId(input.comment)
     if (commentTaskId) {
-      const candidate = await this.resolveLineageCandidateForTaskId(commentTaskId)
-      if (candidate) {
-        candidates.push(candidate)
+      try {
+        const candidate = await this.resolveLineageCandidateForTaskId(commentTaskId)
+        if (candidate) {
+          candidates.push(candidate)
+        }
+      } catch {
+        warnings.push({
+          code: 'LINEAGE_PARENT_CONTEXT_MISSING',
+          message: 'Worktree created, but Orca could not validate the task parent context.',
+          details: { taskId: commentTaskId }
+        })
       }
     }
 
@@ -29638,6 +29653,13 @@ export class OrcaRuntimeService {
     const dispatch = db.getDispatchContext(taskId)
     // Why: agent-created tasks may never be dispatched, but the creating terminal still identifies the parent workspace.
     const parentHandle = dispatch?.assignee_handle ?? db.getTask(taskId)?.created_by_terminal_handle
+    return await this.resolveLineageCandidateForParentHandle(taskId, parentHandle)
+  }
+
+  private async resolveLineageCandidateForParentHandle(
+    taskId: string,
+    parentHandle: string | null | undefined
+  ): Promise<WorktreeLineageCandidate | null> {
     if (!parentHandle) {
       return null
     }
@@ -29672,17 +29694,37 @@ export class OrcaRuntimeService {
     ) {
       return
     }
+    const getWorktreeLineage = store.getWorktreeLineage.bind(store)
+    const setWorktreeLineage = store.setWorktreeLineage.bind(store)
 
     const worktrees = await this.listResolvedWorktrees()
-    for (const worktree of worktrees) {
-      if (store.getWorktreeLineage(worktree.id) || !worktree.instanceId) {
-        continue
+    const unresolved = worktrees.flatMap((worktree) => {
+      if (getWorktreeLineage(worktree.id) || !worktree.instanceId) {
+        return []
       }
       const taskId = extractOrchestrationTaskId(worktree.comment)
       if (!taskId) {
-        continue
+        return []
       }
-      const candidate = await this.resolveLineageCandidateForTaskId(taskId)
+      return [{ taskId, worktree, worktreeInstanceId: worktree.instanceId }]
+    })
+    let passiveHandles: ReadonlyMap<string, string> | null = null
+    if (!this._orchestrationDb) {
+      try {
+        passiveHandles = readOrchestrationTaskLineageHandles(
+          this.getOrchestrationDbPathFn(),
+          unresolved.map(({ taskId }) => taskId)
+        )
+      } catch (error) {
+        console.warn('[orchestration] passive task lineage read failed', { error })
+        passiveHandles = new Map()
+      }
+    }
+
+    for (const { taskId, worktree, worktreeInstanceId } of unresolved) {
+      const candidate = passiveHandles
+        ? await this.resolveLineageCandidateForParentHandle(taskId, passiveHandles.get(taskId))
+        : await this.resolveLineageCandidateForTaskId(taskId)
       if (
         !candidate?.parent.instanceId ||
         candidate.parent.type !== 'worktree' ||
@@ -29695,9 +29737,9 @@ export class OrcaRuntimeService {
       } catch {
         continue
       }
-      store.setWorktreeLineage(worktree.id, {
+      setWorktreeLineage(worktree.id, {
         worktreeId: worktree.id,
-        worktreeInstanceId: worktree.instanceId,
+        worktreeInstanceId,
         parentWorktreeId: candidate.parent.worktree.id,
         parentWorktreeInstanceId: candidate.parent.instanceId,
         origin: 'orchestration',

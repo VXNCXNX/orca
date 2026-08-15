@@ -52,6 +52,7 @@ export type RuntimeApi = {
     onNativeChatLaunchDraftResolved?: (
       callback: (event: { tabId: string; text: string; createdAt: number }) => void
     ) => () => void
+    onOrchestrationReady?: (callback: () => void) => () => void
     onBrowserDriverChanged: (
       callback: (event: { browserPageId: string; driver: RuntimeBrowserDriverState }) => void
     ) => () => void

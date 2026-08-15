@@ -9,7 +9,13 @@ function hasReleaseIndex(db: SyncDatabase): boolean {
   )
 }
 
-export function hasRequestedWorkerTerminalReleaseBacklog(dbPath: string): boolean {
+function hasReleaseStateColumn(db: SyncDatabase): boolean {
+  return (
+    db.prepare('PRAGMA table_info(worker_terminal_resources)').all() as { name?: string }[]
+  ).some((row) => row.name === 'release_state')
+}
+
+export function requiresWorkerTerminalReleaseReadiness(dbPath: string): boolean {
   if (!existsSync(dbPath)) {
     return false
   }
@@ -20,8 +26,11 @@ export function hasRequestedWorkerTerminalReleaseBacklog(dbPath: string): boolea
   })
   try {
     db.pragma('query_only = ON')
-    if (!hasReleaseIndex(db)) {
+    if (!hasReleaseStateColumn(db)) {
       return false
+    }
+    if (!hasReleaseIndex(db)) {
+      return true
     }
     return Boolean(
       db

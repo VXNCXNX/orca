@@ -13,6 +13,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  realpathSync,
   rmSync,
   writeFileSync
 } from 'node:fs'
@@ -30,6 +31,7 @@ const MAILBOX_INDEXES = [
   'idx_messages_unread_current_inbox_type',
   'idx_messages_unread_current_run_type'
 ]
+const STARTUP_LINEAGE_TASK_ID = 'task_startuplineage'
 
 function parseArgs(argv) {
   const args = { expect: 'deferred', rows: 250_000, keepFixtures: false }
@@ -78,6 +80,41 @@ function buildDatabaseFixtureFactory(root) {
 function openRawDatabase(path, options) {
   const { DatabaseSync } = require('node:sqlite')
   return options ? new DatabaseSync(path, options) : new DatabaseSync(path)
+}
+
+function runGit(cwd, args) {
+  const result = spawnSync('git', args, { cwd, stdio: 'ignore' })
+  if (result.error) {
+    throw result.error
+  }
+  if (result.status !== 0) {
+    throw new Error(`git ${args.join(' ')} failed with status ${result.status}`)
+  }
+}
+
+function createStartupLineageRepo(root) {
+  const repoPath = join(root, 'startup-lineage-repo')
+  mkdirSync(repoPath)
+  runGit(repoPath, ['init'])
+  runGit(repoPath, ['symbolic-ref', 'HEAD', 'refs/heads/main'])
+  runGit(repoPath, ['config', 'user.name', 'STA-4408 benchmark'])
+  runGit(repoPath, ['config', 'user.email', 'sta-4408@example.invalid'])
+  writeFileSync(join(repoPath, 'README.md'), 'startup lineage fixture\n')
+  runGit(repoPath, ['add', 'README.md'])
+  runGit(repoPath, ['commit', '-m', 'fixture'])
+  const canonicalRepoPath = realpathSync(repoPath)
+  const repoId = 'repo_startup_lineage'
+  return {
+    repo: {
+      id: repoId,
+      path: canonicalRepoPath,
+      displayName: 'Startup lineage fixture',
+      badgeColor: 'blue',
+      addedAt: 1,
+      externalWorktreeVisibility: 'show'
+    },
+    worktreeId: `${repoId}::${canonicalRepoPath}`
+  }
 }
 
 function countMailboxIndexes(db) {
@@ -132,6 +169,11 @@ function createTemplate(path, rows, OrchestrationDb) {
     db.exec('ROLLBACK')
     throw error
   }
+  db.prepare('INSERT INTO tasks (id, spec, created_by_terminal_handle) VALUES (?, ?, ?)').run(
+    STARTUP_LINEAGE_TASK_ID,
+    'startup lineage fixture',
+    'term_fixture_missing'
+  )
   db.exec('PRAGMA user_version = 28')
   db.exec('PRAGMA wal_checkpoint(TRUNCATE)')
   db.close()
@@ -247,14 +289,23 @@ function launchElectron(profilePath) {
         events.push(parsed)
         const didFinishLoad = eventTime(events, 'did-finish-load')
         const graphReady = eventTime(events, 'runtime-graph-ready')
-        const hasPostLoadStall = events.some(
+        const lineageRefresh = eventTime(events, 'renderer-remote-worktree-refresh-done')
+        const hasPostRefreshStall = events.some(
           (entry) =>
             entry.event === 'event-loop-stall' &&
+            entry.time !== null &&
+            lineageRefresh !== null &&
+            entry.time >= lineageRefresh &&
             entry.maxGapAt !== null &&
             didFinishLoad !== null &&
             entry.maxGapAt >= didFinishLoad
         )
-        if (didFinishLoad !== null && graphReady !== null && hasPostLoadStall) {
+        if (
+          didFinishLoad !== null &&
+          graphReady !== null &&
+          lineageRefresh !== null &&
+          hasPostRefreshStall
+        ) {
           finish()
         }
       }
@@ -289,9 +340,27 @@ async function main() {
     const profilePath = join(root, 'profile')
     mkdirSync(profilePath)
     copyFileSync(templatePath, join(profilePath, 'orchestration.db'))
+    const startupLineage = createStartupLineageRepo(root)
     writeFileSync(
       join(profilePath, 'orca-data.json'),
-      JSON.stringify({ schemaVersion: 1, repos: [], settings: {} })
+      JSON.stringify({
+        schemaVersion: 1,
+        repos: [startupLineage.repo],
+        worktreeMeta: {
+          [startupLineage.worktreeId]: {
+            displayName: 'Startup lineage fixture',
+            comment: `Created via orchestration task ${STARTUP_LINEAGE_TASK_ID}`,
+            instanceId: '11111111-1111-4111-8111-111111111111',
+            isArchived: false,
+            isUnread: false,
+            isPinned: false,
+            sortOrder: 0,
+            lastActivityAt: 1,
+            createdAt: 1
+          }
+        },
+        settings: {}
+      })
     )
     const events = await launchElectron(profilePath)
     const afterStartup = inspectDatabase(join(profilePath, 'orchestration.db'))
@@ -299,7 +368,14 @@ async function main() {
     const openWindow = eventTime(events, 'open-main-window-start')
     const didFinishLoad = eventTime(events, 'did-finish-load')
     const graphReady = eventTime(events, 'runtime-graph-ready')
-    if (appReady === null || openWindow === null || didFinishLoad === null || graphReady === null) {
+    const lineageRefresh = eventTime(events, 'renderer-remote-worktree-refresh-done')
+    if (
+      appReady === null ||
+      openWindow === null ||
+      didFinishLoad === null ||
+      graphReady === null ||
+      lineageRefresh === null
+    ) {
       throw new Error('Required startup timing milestones were not observed')
     }
     const postLoadStalls = events.filter(
@@ -315,6 +391,7 @@ async function main() {
     const startupBlockingMs = Number((openWindow - appReady).toFixed(1))
     const firstGraphReadyMs = Number((graphReady - appReady).toFixed(1))
     const graphAfterLoadMs = Number((graphReady - didFinishLoad).toFixed(1))
+    const lineageRefreshAfterLoadMs = Number((lineageRefresh - didFinishLoad).toFixed(1))
     const maxEventLoopStallMs = Math.max(...postLoadStalls.map((entry) => entry.maxGapMs))
     const eventualAfterStartupMs = measureConstructor(
       join(profilePath, 'orchestration.db'),
@@ -328,6 +405,7 @@ async function main() {
         blockingMs: startupBlockingMs,
         firstGraphReadyMs,
         graphAfterLoadMs,
+        lineageRefreshAfterLoadMs,
         maxEventLoopStallMs,
         database: afterStartup
       },

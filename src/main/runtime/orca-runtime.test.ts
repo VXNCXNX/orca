@@ -42679,6 +42679,44 @@ describe('OrcaRuntimeService', () => {
     ])
   })
 
+  it('keeps task-comment lineage best-effort when orchestration readiness fails', async () => {
+    const childPath = '/tmp/workspaces/task-db-unavailable'
+    computeWorktreePathMock.mockReturnValue(childPath)
+    ensurePathWithinWorkspaceMock.mockReturnValue(childPath)
+    vi.mocked(listWorktrees).mockResolvedValue([
+      {
+        path: childPath,
+        head: 'def',
+        branch: 'task-db-unavailable',
+        isBare: false,
+        isMainWorktree: false
+      }
+    ])
+    const runtime = new OrcaRuntimeService(store, undefined, {
+      getOrchestrationDbPath: () => {
+        throw new Error('orchestration database unavailable')
+      }
+    })
+
+    const result = await runtime.createManagedWorktree({
+      repoSelector: 'id:repo-1',
+      name: 'task-db-unavailable',
+      comment: 'Created via orchestration task task_unavailable'
+    })
+
+    expect(result.lineage).toBeNull()
+    expect(result.worktree).toMatchObject({
+      parentWorktreeId: null,
+      childWorktreeIds: [],
+      lineage: null
+    })
+    expect(result.warnings).toContainEqual({
+      code: 'LINEAGE_PARENT_CONTEXT_MISSING',
+      message: 'Worktree created, but Orca could not validate the task parent context.',
+      details: { taskId: 'task_unavailable' }
+    })
+  })
+
   it('infers orchestration lineage from task-id comments when dispatch is completed', async () => {
     const workerPath = '/tmp/worktree-worker'
     const childPath = '/tmp/workspaces/worker-child'
@@ -42736,25 +42774,22 @@ describe('OrcaRuntimeService', () => {
     })
     computeWorktreePathMock.mockReturnValue(childPath)
     ensurePathWithinWorkspaceMock.mockReturnValue(childPath)
-    vi.mocked(listWorktrees)
-      .mockResolvedValueOnce([
-        {
-          path: workerPath,
-          head: 'fed',
-          branch: 'feature/worker',
-          isBare: false,
-          isMainWorktree: false
-        }
-      ])
-      .mockResolvedValueOnce([
-        {
-          path: childPath,
-          head: 'def',
-          branch: 'worker-child',
-          isBare: false,
-          isMainWorktree: false
-        }
-      ])
+    vi.mocked(listWorktrees).mockResolvedValue([
+      {
+        path: workerPath,
+        head: 'fed',
+        branch: 'feature/worker',
+        isBare: false,
+        isMainWorktree: false
+      },
+      {
+        path: childPath,
+        head: 'def',
+        branch: 'worker-child',
+        isBare: false,
+        isMainWorktree: false
+      }
+    ])
 
     const result = await runtime.createManagedWorktree({
       repoSelector: 'id:repo-1',
@@ -42834,25 +42869,22 @@ describe('OrcaRuntimeService', () => {
     })
     computeWorktreePathMock.mockReturnValue(childPath)
     ensurePathWithinWorkspaceMock.mockReturnValue(childPath)
-    vi.mocked(listWorktrees)
-      .mockResolvedValueOnce([
-        {
-          path: parentPath,
-          head: 'fed',
-          branch: 'feature/parent',
-          isBare: false,
-          isMainWorktree: false
-        }
-      ])
-      .mockResolvedValueOnce([
-        {
-          path: childPath,
-          head: 'def',
-          branch: 'parent-child',
-          isBare: false,
-          isMainWorktree: false
-        }
-      ])
+    vi.mocked(listWorktrees).mockResolvedValue([
+      {
+        path: parentPath,
+        head: 'fed',
+        branch: 'feature/parent',
+        isBare: false,
+        isMainWorktree: false
+      },
+      {
+        path: childPath,
+        head: 'def',
+        branch: 'parent-child',
+        isBare: false,
+        isMainWorktree: false
+      }
+    ])
 
     const result = await runtime.createManagedWorktree({
       repoSelector: 'id:repo-1',
@@ -42873,6 +42905,116 @@ describe('OrcaRuntimeService', () => {
         parentWorktreeInstanceId: 'parent-instance'
       })
     )
+  })
+
+  it('hydrates task-comment lineage from disk without opening schema readiness', async () => {
+    const fixtureDir = await mkdtemp(join(tmpdir(), 'orca-passive-lineage-'))
+    onTestFinished(() => rm(fixtureDir, { recursive: true, force: true }))
+    const dbPath = join(fixtureDir, 'orchestration.db')
+    const parentPath = '/tmp/worktree-passive-parent'
+    const childPath = '/tmp/worktree-passive-child'
+    const parentId = `${TEST_REPO_ID}::${parentPath}`
+    const childId = `${TEST_REPO_ID}::${childPath}`
+    const metaById: Record<string, WorktreeMeta> = {
+      [parentId]: makeWorktreeMeta({ instanceId: 'passive-parent-instance' }),
+      [childId]: makeWorktreeMeta({ instanceId: 'passive-child-instance' })
+    }
+    const lineageById: Record<string, WorktreeLineage> = {}
+    const setWorktreeLineage = vi.fn((worktreeId: string, lineage: WorktreeLineage) => {
+      lineageById[worktreeId] = lineage
+      return lineage
+    })
+    const runtimeStore = {
+      ...store,
+      getAllWorktreeMeta: () => metaById,
+      getWorktreeMeta: (worktreeId: string) => metaById[worktreeId],
+      getAllWorktreeLineage: () => lineageById,
+      getWorktreeLineage: (worktreeId: string) => lineageById[worktreeId],
+      setWorktreeLineage
+    }
+    const runtime = new OrcaRuntimeService(runtimeStore as never, undefined, {
+      getOrchestrationDbPath: () => dbPath
+    })
+    const parentHandle = runtime.preAllocateHandleForPty('pty-passive-parent')
+    const fixture = new OrchestrationDb(dbPath)
+    const task = fixture.createTask({
+      spec: 'passive lineage',
+      createdByTerminalHandle: parentHandle
+    })
+    fixture.close()
+    metaById[childId] = makeWorktreeMeta({
+      instanceId: 'passive-child-instance',
+      comment: `Created via orchestration task ${task.id}`
+    })
+    const raw = new SyncDatabase(dbPath)
+    for (const name of [
+      'idx_messages_undelivered_direct_run',
+      'idx_messages_unread_current_inbox',
+      'idx_messages_unread_current_inbox_type',
+      'idx_messages_unread_current_run_type'
+    ]) {
+      raw.exec(`DROP INDEX IF EXISTS ${name}`)
+    }
+    raw.pragma('user_version = 28')
+    raw.close()
+    runtime.attachWindow(1)
+    runtime.syncWindowGraph(1, {
+      tabs: [
+        {
+          tabId: 'tab-passive-parent',
+          worktreeId: parentId,
+          title: 'Parent',
+          activeLeafId: 'pane:1',
+          layout: null
+        }
+      ],
+      leaves: [
+        {
+          tabId: 'tab-passive-parent',
+          worktreeId: parentId,
+          leafId: 'pane:1',
+          paneRuntimeId: 1,
+          ptyId: 'pty-passive-parent',
+          paneTitle: null
+        }
+      ]
+    })
+    vi.mocked(listWorktrees).mockResolvedValue([
+      makeWorktreeInfo(parentPath, 'parent-head'),
+      makeWorktreeInfo(childPath, 'child-head')
+    ])
+    expect(await runtime.showTerminal(parentHandle)).toMatchObject({ worktreeId: parentId })
+
+    await runtime.hydrateInferredWorktreeLineage()
+
+    expect(setWorktreeLineage).toHaveBeenCalledWith(
+      childId,
+      expect.objectContaining({
+        parentWorktreeId: parentId,
+        taskId: task.id,
+        origin: 'orchestration'
+      })
+    )
+    expect(runtime.syncWindowGraph(1, { tabs: [], leaves: [] }).agentOrchestrationReady).toBe(false)
+    const inspection = new SyncDatabase(dbPath, { readonly: true, fileMustExist: true })
+    try {
+      expect(
+        inspection
+          .prepare(
+            `SELECT count(*) AS count FROM sqlite_master
+             WHERE type = 'index' AND name IN (
+               'idx_messages_undelivered_direct_run',
+               'idx_messages_unread_current_inbox',
+               'idx_messages_unread_current_inbox_type',
+               'idx_messages_unread_current_run_type'
+             )`
+          )
+          .get()
+      ).toEqual({ count: 0 })
+      expect(inspection.pragma('user_version', { simple: true })).toBe(28)
+    } finally {
+      inspection.close()
+    }
   })
 
   it('returns a setup launch payload for CLI-created worktrees when hooks are explicitly enabled', async () => {
