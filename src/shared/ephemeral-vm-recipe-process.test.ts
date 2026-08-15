@@ -311,6 +311,10 @@ describe('runRecipeCommand', () => {
       })
       expect(spawnTreeKiller).toHaveBeenCalledOnce()
       expect(child.kill).not.toHaveBeenCalled()
+      expect(gracefulKiller.kill).toHaveBeenCalledWith('SIGKILL')
+      expect(gracefulKiller.unref).toHaveBeenCalledOnce()
+      expect(gracefulKiller.listenerCount('close')).toBe(0)
+      expect(vi.getTimerCount()).toBe(0)
     } finally {
       restorePlatform()
     }

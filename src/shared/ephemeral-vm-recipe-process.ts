@@ -122,6 +122,7 @@ export async function runRecipeCommand(args: {
         return
       }
       aborted = true
+      gracefulTreeKillerController?.abort()
       if (hasRecipeProcessExited(child, processExited)) {
         finishUnconfirmedExitedProcess()
         return
@@ -133,7 +134,6 @@ export async function runRecipeCommand(args: {
       if (treeExitCheckTimer) {
         clearTimeout(treeExitCheckTimer)
       }
-      gracefulTreeKillerController?.abort()
       void terminateRecipeProcess(child, true, args.spawnTreeKiller).then((confirmed) => {
         finish({
           stdout,
