@@ -272,7 +272,7 @@ describe('ephemeral VM runtime service', () => {
         repoPath,
         recipe,
         runtimeId: 'runtime-deadline',
-        cleanupDeadlineMs: 100
+        cleanupDeadlineMs: 1_000
       }
       const cleanup = cleanupEphemeralVmRuntime(cleanupArgs)
 
@@ -283,7 +283,7 @@ describe('ephemeral VM runtime service', () => {
         })
         const settlement = await Promise.race([
           cleanup.then(() => 'settled' as const),
-          new Promise<'pending'>((resolve) => setTimeout(() => resolve('pending'), 6_500))
+          new Promise<'pending'>((resolve) => setTimeout(() => resolve('pending'), 2_500))
         ])
 
         const runtimeAtSettlement = listEphemeralVmRuntimes(userDataPath).find(

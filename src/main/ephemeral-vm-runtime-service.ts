@@ -19,7 +19,10 @@ import {
   prepareEphemeralVmCompatibilityPersistence
 } from './ephemeral-vm-runtime-provisioning-persistence'
 import { getProvisionedRootResumeIntegrityError } from './ephemeral-vm-resume-integrity'
-import { runControlledEphemeralVmRuntimeCleanup } from './ephemeral-vm-runtime-cleanup-control'
+import {
+  getEphemeralVmRuntimeCleanupDeadlineMs,
+  runControlledEphemeralVmRuntimeCleanup
+} from './ephemeral-vm-runtime-cleanup-control'
 
 export { stopEphemeralVmRuntimeCleanup } from './ephemeral-vm-runtime-cleanup-control'
 
@@ -59,6 +62,7 @@ export type CleanupEphemeralVmRuntimeArgs = {
   recipe: OrcaVmRecipe
   runtimeId: string
   now?: number
+  cleanupDeadlineMs?: number
   signal?: AbortSignal
   onStdout?: (chunk: string) => void
   onStderr?: (chunk: string) => void
@@ -144,6 +148,7 @@ export function cleanupEphemeralVmRuntime(
     userDataPath: args.userDataPath,
     runtimeId: args.runtimeId,
     signal: args.signal,
+    deadlineMs: args.cleanupDeadlineMs,
     run: (signal) => cleanupEphemeralVmRuntimeOnce({ ...args, signal })
   })
 }
@@ -183,14 +188,19 @@ async function cleanupEphemeralVmRuntimeOnce(
     onStderr: args.onStderr
   })
 
-  if (!cleanup.ok) {
+  const deadlineMs = args.signal ? getEphemeralVmRuntimeCleanupDeadlineMs(args.signal) : null
+  if (!cleanup.ok || deadlineMs !== null) {
+    const error =
+      deadlineMs === null
+        ? (cleanup.error ?? 'Destroy failed.')
+        : `Cleanup exceeded its ${formatCleanupDeadline(deadlineMs)} deadline. Retry cleanup or copy the destroy command.`
     const failed = updateEphemeralVmRuntimeStatus(args.userDataPath, existing.id, {
       status: 'cleanup_failed',
       cleanupStatus: 'failed',
-      cleanupLastError: cleanup.error ?? 'Destroy failed.',
+      cleanupLastError: error,
       updatedAt: Date.now()
     })
-    return { ok: false, runtime: failed, error: cleanup.error ?? 'Destroy failed.' }
+    return { ok: false, runtime: failed, error }
   }
 
   const cleaned = updateEphemeralVmRuntimeStatus(args.userDataPath, existing.id, {
@@ -200,6 +210,14 @@ async function cleanupEphemeralVmRuntimeOnce(
     updatedAt: Date.now()
   })
   return { ok: true, runtime: cleaned, skipped: cleanup.skipped }
+}
+
+function formatCleanupDeadline(deadlineMs: number): string {
+  if (deadlineMs % 60_000 === 0) {
+    const minutes = deadlineMs / 60_000
+    return `${minutes} minute${minutes === 1 ? '' : 's'}`
+  }
+  return `${deadlineMs}ms`
 }
 
 export async function suspendEphemeralVmRuntime(

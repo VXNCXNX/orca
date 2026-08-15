@@ -81,21 +81,28 @@ export async function runRecipeCommand(args: {
       args.signal?.removeEventListener('abort', abort)
       reject(error)
     }
+    const forceAbort = (): void => {
+      killRecipeProcess(child, true)
+      finish({ stdout, stderr, exitCode: null, signal: null, aborted: true })
+      child.stdin.destroy()
+      child.stdout.destroy()
+      child.stderr.destroy()
+      child.unref()
+    }
     const abort = (): void => {
       if (settled) {
         return
       }
       aborted = true
+      if (args.mode === 'destroy' && isTimeoutAbort(args.signal)) {
+        forceAbort()
+        return
+      }
       forceKillTimer = setTimeout(() => {
         if (settled) {
           return
         }
-        killRecipeProcess(child, true)
-        finish({ stdout, stderr, exitCode: null, signal: null, aborted: true })
-        child.stdin.destroy()
-        child.stdout.destroy()
-        child.stderr.destroy()
-        child.unref()
+        forceAbort()
       }, CANCEL_FORCE_KILL_DELAY_MS)
       forceKillTimer.unref()
       killRecipeProcess(child)
@@ -130,6 +137,16 @@ export async function runRecipeCommand(args: {
       child.stdin.end()
     }
   })
+}
+
+function isTimeoutAbort(signal: AbortSignal | undefined): boolean {
+  const reason: unknown = signal?.reason
+  return (
+    typeof reason === 'object' &&
+    reason !== null &&
+    'name' in reason &&
+    reason.name === 'TimeoutError'
+  )
 }
 
 function killRecipeProcess(child: ChildProcessWithoutNullStreams, force = false): void {

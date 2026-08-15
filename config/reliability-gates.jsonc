@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-14",
+  "updatedAt": "2026-08-15",
   "policy": {
     "maturityLevels": ["experimental", "soak", "blocking", "accepted-gap", "deprecated"],
     "blockingPromotion": {
@@ -27,16 +27,17 @@
       "providers": ["orca-server", "direct-ssh"],
       "coveredPlatforms": ["macos", "linux", "windows"],
       "coveredProviders": ["orca-server", "direct-ssh"],
-      "coverageNotes": "A pinned exact-source harness runs the pre-#14352 reader and lifecycle service against baseline, affected-main, candidate, and fix-reverted stores. Platform-neutral tests cover store compatibility, user-cancellable cleanup, branch/ref adoption, and resume ownership integrity. The direct-SSH provisioned-root Electron journey remains the live transport and destroy proof; this desktop sidecar is not mobile-facing and changes no RPC or remote wire payload.",
+      "coverageNotes": "A pinned exact-source harness runs the pre-#14352 reader and lifecycle service against baseline, affected-main, candidate, and fix-reverted stores. Platform-neutral tests cover store compatibility, controller-owned destroy deadlines, explicit user cancellation, branch/ref adoption, and resume ownership integrity. A real POSIX process-tree oracle proves bounded exact-tree termination without killing an unrelated process. The direct-SSH provisioned-root Electron journey remains the live transport and destroy proof; this desktop sidecar is not mobile-facing and changes no RPC or remote wire payload.",
       "motivatingLinks": [
         "https://linear.app/stably/issue/STA-4274",
         "https://github.com/stablyai/orca/pull/14352",
         "https://github.com/stablyai/orca/issues/13044"
       ],
-      "invariant": "A sidecar written by the new build cannot make the previous production build lose otherwise compatible VM runtimes. Downgrade lifecycle writes remain authoritative after re-upgrade, provisioned-root metadata remains recoverable, and corrupt or future feature metadata is preserved without poisoning the rollback-readable v1 store. Destroy attempts have no automatic wall-clock cutoff; a user stop terminates the process tree, retains cleanup ownership, and permits a fresh retry. Provider failure retains the SSH/project context needed for safe cleanup. Unrecoverable recipe context releases only the hidden SSH registration while preserving lifecycle/provider metadata. Provisioned-root create receives the source ref's pinned commit, adoption verifies the requested branch/ref, and resume preserves the connection mode plus stable SSH ownership identity while allowing endpoint rotation.",
-      "oracle": "Write one ordinary schema-v1 runtime and one provisioned-root runtime. Require the exact pre-#14352 reader to return both, run the old destroy lifecycle against the projected provisioned record, then require the candidate to retain the cleaned state while restoring schema-v2 and checkout-mode metadata. The same old reader must reject affected-main and fix-reverted bytes. Malformed, oversized, unknown-record, and future-version feature sidecars must leave rollback-compatible records accessible and must not be overwritten during compatible lifecycle mutations. Require destroy to have no implicit deadline, stop a hung destroy through the public desktop action, require cleanup_failed plus a fresh successful retry, prove provider or project-host rollback failure retains every ownership record required to retry, and prove missing recipe context cannot leave an unremovable hidden SSH registration. Supply the source ref's captured commit to create, reject a provisioned checkout on the wrong branch/ref, and reject a resume that changes connection mode or SSH ownership.",
+      "invariant": "A sidecar written by the new build cannot make the previous production build lose otherwise compatible VM runtimes. Downgrade lifecycle writes remain authoritative after re-upgrade, provisioned-root metadata remains recoverable, and corrupt or future feature metadata is preserved without poisoning the rollback-readable v1 store. Every persisted-runtime destroy admitted by the main cleanup controller settles within its five-minute wall-clock deadline, force-aborts only that recipe process tree, retains cleanup ownership, and permits a fresh retry; explicit user Stop remains a distinct graceful-then-force action. Provider failure retains the SSH/project context needed for safe cleanup. Unrecoverable recipe context releases only the hidden SSH registration while preserving lifecycle/provider metadata. Provisioned-root create receives the source ref's pinned commit, adoption verifies the requested branch/ref, and resume preserves the connection mode plus stable SSH ownership identity while allowing endpoint rotation.",
+      "oracle": "Write one ordinary schema-v1 runtime and one provisioned-root runtime. Require the exact pre-#14352 reader to return both, run the old destroy lifecycle against the projected provisioned record, then require the candidate to retain the cleaned state while restoring schema-v2 and checkout-mode metadata. The same old reader must reject affected-main and fix-reverted bytes. Malformed, oversized, unknown-record, and future-version feature sidecars must leave rollback-compatible records accessible and must not be overwritten during compatible lifecycle mutations. Inject a provider that never exits, advance the controller-owned deadline, and require bounded settlement, cleanup_failed retry state with an actionable deadline error, dead provider and descendant PIDs, and a live unrelated PID. Require generic recipe commands to remain deadline-free unless their owner supplies a timeout signal, preserve explicit Stop plus fresh retry, prove provider or project-host rollback failure retains every ownership record required to retry, and prove missing recipe context cannot leave an unremovable hidden SSH registration. Supply the source ref's captured commit to create, reject a provisioned checkout on the wrong branch/ref, and reject a resume that changes connection mode or SSH ownership.",
       "commands": [
         "node config/scripts/run-ephemeral-vm-runtime-store-rollback-repro.mjs config/scripts/ephemeral-vm-runtime-store-cross-version.test.ts",
+        "pnpm exec vitest run --config config/vitest.config.ts src/shared/ephemeral-vm-runtime-store.test.ts src/shared/ephemeral-vm-runtime-store-rollback.test.ts src/shared/ephemeral-vm-recipe-process.test.ts src/main/ephemeral-vm-runtime-cleanup-control.test.ts src/main/ephemeral-vm-runtime-service.test.ts src/main/ephemeral-vm-resume-integrity.test.ts src/main/ephemeral-vm-recipe-runner.test.ts src/main/ephemeral-vm-runtime-ssh-cleanup.test.ts src/main/ipc/ephemeral-vm-runtime-handler-cleanup.test.ts src/main/ipc/ephemeral-vm-provision-cancel.test.ts src/main/ipc/ephemeral-vm-provisioned-root-ref.test.ts src/main/ipc/ephemeral-vm.test.ts src/main/provisioned-root-ssh-adoption.test.ts src/renderer/src/components/settings/EphemeralVmRuntimesSection.test.tsx src/renderer/src/lib/ephemeral-vm-failed-create-cleanup.test.ts src/renderer/src/lib/ephemeral-vm-runtime-cleanup.test.ts src/renderer/src/lib/ephemeral-vm-workspace-target.test.ts src/renderer/src/lib/ephemeral-vm-worktree-creation.test.ts src/renderer/src/lib/provisioned-root-create-options.test.ts src/renderer/src/store/slices/repos-ephemeral-vm-cleanup-retention.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts src/shared/ephemeral-vm-runtime-store.test.ts src/shared/ephemeral-vm-runtime-store-rollback.test.ts src/shared/ephemeral-vm-recipe-process.test.ts src/main/ephemeral-vm-runtime-service.test.ts src/main/ephemeral-vm-resume-integrity.test.ts src/main/ephemeral-vm-recipe-runner.test.ts src/main/ephemeral-vm-runtime-ssh-cleanup.test.ts src/main/ipc/ephemeral-vm-runtime-handler-cleanup.test.ts src/main/ipc/ephemeral-vm-provision-cancel.test.ts src/main/ipc/ephemeral-vm-provisioned-root-ref.test.ts src/main/ipc/ephemeral-vm.test.ts src/main/provisioned-root-ssh-adoption.test.ts src/renderer/src/components/settings/EphemeralVmRuntimesSection.test.tsx src/renderer/src/lib/ephemeral-vm-failed-create-cleanup.test.ts src/renderer/src/lib/ephemeral-vm-runtime-cleanup.test.ts src/renderer/src/lib/ephemeral-vm-workspace-target.test.ts src/renderer/src/lib/ephemeral-vm-worktree-creation.test.ts src/renderer/src/lib/provisioned-root-create-options.test.ts src/renderer/src/store/slices/repos-ephemeral-vm-cleanup-retention.test.ts",
         "ORCA_E2E_SSH_DOCKER=1 pnpm exec playwright test tests/e2e/ephemeral-vm-provisioned-root.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
         "SKIP_BUILD=1 ORCA_E2E_SSH_DOCKER=1 pnpm exec playwright test tests/e2e/ephemeral-vm-provisioned-root.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
@@ -48,6 +49,7 @@
         "src/shared/ephemeral-vm-runtime-store-rollback.test.ts",
         "src/shared/ephemeral-vm-runtime-store.test.ts",
         "src/shared/ephemeral-vm-recipe-process.test.ts",
+        "src/main/ephemeral-vm-runtime-cleanup-control.test.ts",
         "src/main/ephemeral-vm-runtime-service.test.ts",
         "src/main/ephemeral-vm-recipe-runner.test.ts",
         "src/main/ephemeral-vm-runtime-ssh-cleanup.test.ts",
@@ -86,17 +88,26 @@
           ]
         },
         {
+          "file": "src/main/ephemeral-vm-runtime-cleanup-control.test.ts",
+          "assertions": [
+            "one deadline timer is owned per exact in-flight runtime and cleared on settlement",
+            "explicit Stop remains distinct from deadline expiry"
+          ]
+        },
+        {
           "file": "src/main/ephemeral-vm-runtime-service.test.ts",
           "assertions": [
             "an unreadable companion rejects checkout-mode recipes before their create command runs",
             "post-create persistence failure destroys the provider resource when possible",
-            "failed destroy persists a durable rollback-readable cleanup recovery record"
+            "failed destroy persists a durable rollback-readable cleanup recovery record",
+            "a hung provider deadline settles retryable, kills its exact process tree, and preserves an unrelated process"
           ]
         },
         {
           "file": "src/shared/ephemeral-vm-recipe-process.test.ts",
           "assertions": [
             "recipe commands have no implicit wall-clock deadline",
+            "a deadline signal force-kills and settles immediately",
             "a stopped process that ignores graceful termination is force-killed and settled"
           ]
         },
@@ -159,7 +170,7 @@
         {
           "file": "tests/e2e/ephemeral-vm-cleanup-retry.spec.ts",
           "assertions": [
-            "the rendered runtime row stops a live cleanup process without an automatic deadline and a retry succeeds"
+            "the rendered runtime row stops a live cleanup before its automatic deadline and a retry succeeds"
           ]
         },
         {
@@ -213,19 +224,19 @@
       },
       "performanceBudget": {
         "required": true,
-        "evidence": "Ordinary writes remain byte-identical and create no feature sidecar. Reads add one bounded feature-file existence check; sorted feature comparisons avoid unchanged rewrites, and durable companion writes occur only when compatibility metadata changes. Cleanup adds one constant-size in-flight controller per active destroy and no automatic deadline; the visible settings section polls once per second only while cleanup is active. Provisioning adds one source-host Git ref-resolution command only when a ref was requested and runs it before provider create; adoption adds no remote subprocess beyond its existing checkout probes, and resume adds only in-memory comparisons."
+        "evidence": "Ordinary writes remain byte-identical and create no feature sidecar. Reads add one bounded feature-file existence check; sorted feature comparisons avoid unchanged rewrites, and durable companion writes occur only when compatibility metadata changes. Cleanup adds one constant-size controller and one unref'ed deadline timer per active exact runtime; both are shared by joiners and cleared on settlement. The visible settings section polls once per second only while cleanup is active. Provisioning adds one source-host Git ref-resolution command only when a ref was requested and runs it before provider create; adoption adds no remote subprocess beyond its existing checkout probes, and resume adds only in-memory comparisons."
       },
       "promotionCriteria": [
         "Keep the pinned baseline/latest/candidate/revert oracle green in CI.",
         "Keep the Docker provisioned-root create/adopt/terminal/remove/destroy journey green.",
-        "Keep user-stopped destroy, fresh retry, and retained-context failure tests green.",
+        "Keep deadline-expired and user-stopped destroy, fresh retry, exact-process, and retained-context failure tests green.",
         "Collect soak history without unexplained lifecycle or sidecar flakes."
       ],
       "knownGaps": [
         "No packaged-build downgrade installer journey; the exact released source reader and service are executed in-process.",
         "Live Docker SSH evidence runs locally on macOS and in the changed-file PR E2E lane on Ubuntu; Windows desktop behavior is covered by the platform-neutral filesystem codec and package job."
       ],
-      "demotionRule": "Demote if a new write fails the pinned rollback reader, a downgrade lifecycle mutation is lost after re-upgrade, malformed/future metadata overwrites recoverable bytes, ordinary v1 bytes change, user stop cannot settle a destroy process tree, cleanup loses retry ownership, an unrecoverable context leaves a permanent hidden SSH registration, or the focused gate flakes without an identified harness defect."
+      "demotionRule": "Demote if a new write fails the pinned rollback reader, a downgrade lifecycle mutation is lost after re-upgrade, malformed/future metadata overwrites recoverable bytes, ordinary v1 bytes change, deadline expiry or user Stop cannot settle the exact destroy process tree without affecting an unrelated process, cleanup loses retry ownership, an unrecoverable context leaves a permanent hidden SSH registration, or the focused gate flakes without an identified harness defect."
     },
     {
       "id": "terminal-session.shell-ready-exec-prompt-fallback",

@@ -80,6 +80,35 @@ describe('runRecipeCommand', () => {
     expect(child.unref).toHaveBeenCalledOnce()
   })
 
+  it('force-kills and settles immediately when a deadline signal aborts', async () => {
+    vi.useFakeTimers()
+    const child = Object.assign(new EventEmitter(), {
+      pid: undefined,
+      stdin: new PassThrough(),
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      kill: vi.fn(),
+      unref: vi.fn()
+    })
+    const controller = new AbortController()
+    const resultPromise = runRecipeCommand({
+      command: 'destroy',
+      repoPath: makeRepo(),
+      mode: 'destroy',
+      resultSchemaVersion: 1,
+      context: { recipeId: 'cloud-sandbox', repoPath: makeRepo() },
+      signal: controller.signal,
+      spawnCommand: vi.fn(() => child) as never
+    })
+
+    controller.abort({ name: 'TimeoutError' })
+
+    await expect(resultPromise).resolves.toMatchObject({ aborted: true, exitCode: null })
+    expect(child.kill).toHaveBeenCalledWith('SIGKILL')
+    expect(child.unref).toHaveBeenCalledOnce()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
   it('clears the force-kill timer when graceful termination closes synchronously', async () => {
     vi.useFakeTimers()
     const child = Object.assign(new EventEmitter(), {
