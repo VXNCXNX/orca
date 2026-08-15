@@ -30,7 +30,7 @@ vi.mock('../ipc/worktree-logic', async (importOriginal) => {
   return { ...actual, computeWorktreePath: vi.fn(), ensurePathWithinWorkspace: vi.fn() }
 })
 
-vi.mock('../ipc/filesystem-auth', () => ({
+vi.mock('../ipc/registered-worktree-roots-cache', () => ({
   invalidateAuthorizedRootsCache: vi.fn()
 }))
 

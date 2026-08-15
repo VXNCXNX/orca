@@ -114,7 +114,7 @@ vi.mock('../git/worktree', () => ({
   listWorktreeGraph: listWorktreeGraphMock
 }))
 
-vi.mock('./filesystem-auth', () => ({
+vi.mock('./registered-worktree-roots-cache', () => ({
   invalidateAuthorizedRootsCache: invalidateAuthorizedRootsCacheMock
 }))
 

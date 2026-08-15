@@ -916,7 +916,8 @@ import {
   removeWorktree
 } from '../git/worktree'
 import type { AddWorktreeOptions, AddWorktreeResult } from '../git/worktree'
-import { isENOENT, invalidateAuthorizedRootsCache } from '../ipc/filesystem-auth'
+import { isENOENT } from '../ipc/filesystem-path-containment'
+import { invalidateAuthorizedRootsCache } from '../ipc/registered-worktree-roots-cache'
 import {
   createSetupRunnerScript,
   getDefaultTabCommandTrustContent,

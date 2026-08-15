@@ -210,7 +210,10 @@ vi.mock('../source-control/pull-request-linked-issue', () => ({
 }))
 
 import { registerFilesystemHandlers } from './filesystem'
-import { invalidateAuthorizedRootsCache, registerWorktreeRootsForRepo } from './filesystem-auth'
+import {
+  invalidateAuthorizedRootsCache,
+  registerWorktreeRootsForRepo
+} from './registered-worktree-roots-cache'
 
 // Why: paths are resolved via path.resolve() in production code, so test
 // data must use resolved paths to avoid Unix-vs-Windows mismatches.

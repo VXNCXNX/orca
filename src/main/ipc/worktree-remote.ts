@@ -106,7 +106,8 @@ import {
   findRemoteForUrl,
   prepareWorktreePushTargetWithExec
 } from './worktree-push-target-setup'
-import { isENOENT, registerWorktreeRootsForRepo } from './filesystem-auth'
+import { isENOENT } from './filesystem-path-containment'
+import { registerWorktreeRootsForRepo } from './registered-worktree-roots-cache'
 import {
   createWorktreeCopiedPaths,
   createWorktreeLinkedPaths,

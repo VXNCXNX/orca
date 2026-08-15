@@ -96,10 +96,8 @@ vi.mock('../tray/system-tray', () => ({
   setTrayAttention: setTrayAttentionMock
 }))
 
-import {
-  registerNotificationHandlers,
-  triggerStartupNotificationRegistration
-} from './notifications'
+import { registerNotificationHandlers } from './notifications'
+import { triggerStartupNotificationRegistration } from './startup-notification-registration'
 
 describe('registerNotificationHandlers', () => {
   let tempDir: string
