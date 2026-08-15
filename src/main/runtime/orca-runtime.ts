@@ -131,6 +131,7 @@ import {
   planLegacyWorkerTerminalRecovery,
   type LegacyWorkerTerminalRecoveryPlan
 } from './orchestration/orchestration-legacy-worker-terminal-recovery'
+import { readLegacyWorkerTerminalRecoveryRows } from './orchestration/orchestration-legacy-worker-recovery-reader'
 import {
   buildObservedSetupCommand,
   createSetupCompletionScanner
@@ -2767,6 +2768,7 @@ export class OrcaRuntimeService {
   private managedHookReconciliationGeneration = 0
   private managedHookReconciliationTail: Promise<void> = Promise.resolve()
   private readonly orchestrationEnvironmentTransport: OrchestrationEnvironmentTransport | null
+  private readonly getOrchestrationDbPathFn: () => string
   private readonly orchestrationFederationTimers = new Map<string, ReturnType<typeof setInterval>>()
   private orchestrationTerminalHistoryRecoveryTimer: ReturnType<typeof setTimeout> | null = null
   private orchestrationTerminalHistoryRecoveryInFlight: Promise<void> | null = null
@@ -3464,6 +3466,7 @@ export class OrcaRuntimeService {
       getDesktopWindowStatus?: () => RuntimeDesktopWindowStatus
       agentSessionClaimSigner?: AgentSessionClaimSigner
       orchestrationEnvironmentTransport?: OrchestrationEnvironmentTransport
+      getOrchestrationDbPath?: () => string
     }
   ) {
     this.store = store
@@ -3476,6 +3479,12 @@ export class OrcaRuntimeService {
       this.store?.setMobileClientTabSelections?.(state)
     })
     this.orchestrationEnvironmentTransport = deps?.orchestrationEnvironmentTransport ?? null
+    this.getOrchestrationDbPathFn =
+      deps?.getOrchestrationDbPath ??
+      (() => {
+        const { app } = require('electron')
+        return join(app.getPath('userData'), 'orchestration.db')
+      })
     if (stats) {
       this.stats = stats
       this.agentDetector = new AgentDetector(stats)
@@ -3974,9 +3983,7 @@ export class OrcaRuntimeService {
   // to inject an in-memory DB without touching the filesystem.
   getOrchestrationDb(): OrchestrationDb {
     if (!this._orchestrationDb) {
-      const { app } = require('electron')
-      const dbPath = join(app.getPath('userData'), 'orchestration.db')
-      this._orchestrationDb = new OrchestrationDb(dbPath)
+      this._orchestrationDb = new OrchestrationDb(this.getOrchestrationDbPathFn())
       this.ensureOrchestrationFederationRelay()
       this.scheduleRestoredMessageRepoints()
     }
@@ -3994,7 +4001,8 @@ export class OrcaRuntimeService {
   private getLegacyWorkerTerminalRecoveryPlan(): LegacyWorkerTerminalRecoveryPlan {
     try {
       return planLegacyWorkerTerminalRecovery(
-        this.getOrchestrationDb().listLegacyWorkerTerminalRecoveryRows()
+        this._orchestrationDb?.listLegacyWorkerTerminalRecoveryRows() ??
+          readLegacyWorkerTerminalRecoveryRows(this.getOrchestrationDbPathFn())
       )
     } catch (error) {
       console.warn('[orchestration] failed to plan legacy worker terminal recovery', error)
