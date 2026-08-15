@@ -5,12 +5,19 @@ export const RECIPE_PROCESS_TREE_TERMINATION_TIMEOUT_MS = 5_000
 export function terminateRecipeProcess(
   child: ChildProcessWithoutNullStreams,
   force: boolean,
-  spawnTreeKiller = spawn
+  spawnTreeKiller = spawn,
+  treeKillerCancelSignal?: AbortSignal
 ): Promise<boolean> {
   const signal = force ? 'SIGKILL' : 'SIGTERM'
   if (process.platform === 'win32') {
     if (child.pid) {
-      return terminateWindowsRecipeProcess(child, signal, force, spawnTreeKiller)
+      return terminateWindowsRecipeProcess(
+        child,
+        signal,
+        force,
+        spawnTreeKiller,
+        treeKillerCancelSignal
+      )
     }
     child.kill(signal)
     return Promise.resolve(false)
@@ -51,7 +58,8 @@ function terminateWindowsRecipeProcess(
   child: ChildProcessWithoutNullStreams,
   signal: NodeJS.Signals,
   force: boolean,
-  spawnTreeKiller: typeof spawn
+  spawnTreeKiller: typeof spawn,
+  treeKillerCancelSignal: AbortSignal | undefined
 ): Promise<boolean> {
   return new Promise((resolve) => {
     let settled = false
@@ -59,6 +67,16 @@ function terminateWindowsRecipeProcess(
     let timeout: ReturnType<typeof setTimeout>
     const onError = (): void => finish(false)
     const onClose = (exitCode: number | null): void => finish(exitCode === 0)
+    const onCancel = (): void => {
+      stopTreeKiller()
+      finish(false)
+    }
+    const stopTreeKiller = (): void => {
+      killer.removeListener('error', onError)
+      killer.once('error', ignoreLateTreeKillerError)
+      killer.kill('SIGKILL')
+      killer.unref()
+    }
     const finish = (confirmed: boolean): void => {
       if (settled) {
         return
@@ -67,6 +85,7 @@ function terminateWindowsRecipeProcess(
       clearTimeout(timeout)
       killer.removeListener('error', onError)
       killer.removeListener('close', onClose)
+      treeKillerCancelSignal?.removeEventListener('abort', onCancel)
       if (!confirmed) {
         child.kill(signal)
       }
@@ -84,12 +103,16 @@ function terminateWindowsRecipeProcess(
       return
     }
     timeout = setTimeout(() => {
-      killer.kill('SIGKILL')
-      killer.unref()
+      stopTreeKiller()
       finish(false)
     }, RECIPE_PROCESS_TREE_TERMINATION_TIMEOUT_MS)
     timeout.unref()
     killer.once('error', onError)
     killer.once('close', onClose)
+    treeKillerCancelSignal?.addEventListener('abort', onCancel, { once: true })
   })
+}
+
+function ignoreLateTreeKillerError(): void {
+  // The timeout already records this tree kill as unconfirmed.
 }

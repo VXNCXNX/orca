@@ -122,6 +122,7 @@
             "a deadline signal force-kills and settles immediately",
             "Windows deadline termination waits for taskkill confirmation and bounds nonzero or unresponsive termination without retaining the tree killer",
             "explicit Stop omits Windows force mode before escalating with force at the independent deadline",
+            "a closed Windows root PID is never reused for force escalation and settles unconfirmed instead",
             "an unconfirmed stopped tree produces actionable recovery instead of a benign Stop result",
             "a stopped process that ignores graceful termination is force-killed and settled"
           ]
@@ -222,7 +223,7 @@
           "command": "pnpm exec vitest run --config config/vitest.config.ts src/shared/ephemeral-vm-runtime-store.test.ts src/shared/ephemeral-vm-runtime-store-rollback.test.ts src/shared/ephemeral-vm-recipe-process.test.ts src/main/ephemeral-vm-runtime-cleanup-control.test.ts src/main/ephemeral-vm-runtime-service.test.ts src/main/ephemeral-vm-failed-start-cleanup.test.ts src/main/ephemeral-vm-resume-integrity.test.ts src/main/ephemeral-vm-recipe-runner.test.ts src/main/ephemeral-vm-runtime-ssh-cleanup.test.ts src/main/ipc/ephemeral-vm-runtime-handler-cleanup.test.ts src/main/ipc/ephemeral-vm-provision-cancel.test.ts src/main/ipc/ephemeral-vm-provisioned-root-ref.test.ts src/main/ipc/ephemeral-vm.test.ts src/main/provisioned-root-ssh-adoption.test.ts src/renderer/src/components/settings/EphemeralVmRuntimesSection.test.tsx src/renderer/src/lib/ephemeral-vm-failed-create-cleanup.test.ts src/renderer/src/lib/ephemeral-vm-runtime-cleanup.test.ts src/renderer/src/lib/ephemeral-vm-workspace-target.test.ts src/renderer/src/lib/ephemeral-vm-worktree-creation.test.ts src/renderer/src/lib/provisioned-root-create-options.test.ts src/renderer/src/store/slices/repos-ephemeral-vm-cleanup-retention.test.ts",
           "result": "passed",
           "durationSeconds": 4,
-          "summary": "All 137 focused lifecycle tests passed, including the fixed main-owned provider deadline, failed-start recovery, Stop and deadline exact-tree oracles with unrelated canaries, actionable unconfirmed termination, and mocked Windows taskkill confirmation, failure, timeout, graceful Stop, and force escalation behavior."
+          "summary": "All 138 focused lifecycle tests passed, including the fixed main-owned provider deadline, failed-start recovery, Stop and deadline exact-tree oracles with unrelated canaries, actionable unconfirmed termination, and mocked Windows taskkill confirmation, failure, timeout, graceful Stop, safe force escalation, and stale-PID rejection."
         },
         {
           "date": "2026-08-14",

@@ -225,8 +225,9 @@ describe('runRecipeCommand', () => {
       await expect(resultPromise).resolves.toMatchObject({ terminationFailed: true })
       expect(killer.kill).toHaveBeenCalledWith('SIGKILL')
       expect(killer.unref).toHaveBeenCalledOnce()
-      expect(killer.listenerCount('error')).toBe(0)
       expect(killer.listenerCount('close')).toBe(0)
+      expect(() => killer.emit('error', new Error('late kill error'))).not.toThrow()
+      expect(killer.listenerCount('error')).toBe(0)
       expect(child.kill).toHaveBeenCalledWith('SIGKILL')
       expect(vi.getTimerCount()).toBe(0)
     } finally {
@@ -306,15 +307,60 @@ describe('runRecipeCommand', () => {
       })
 
       stopController.abort()
-      gracefulKiller.emit('close', 1, null)
       deadlineController.abort()
 
+      expect(gracefulKiller.kill).toHaveBeenCalledWith('SIGKILL')
+      expect(gracefulKiller.unref).toHaveBeenCalledOnce()
       expect(spawnTreeKiller).toHaveBeenNthCalledWith(2, 'taskkill', ['/pid', '988', '/t', '/f'], {
         windowsHide: true,
         stdio: 'ignore'
       })
       forceKiller.emit('close', 0, null)
       await expect(resultPromise).resolves.toMatchObject({ aborted: true })
+    } finally {
+      restorePlatform()
+    }
+  })
+
+  it('does not force-kill a stale Windows PID after its owned shell closes', async () => {
+    vi.useFakeTimers()
+    const restorePlatform = setProcessPlatform('win32')
+    const child = Object.assign(new EventEmitter(), {
+      pid: 989,
+      stdin: new PassThrough(),
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      kill: vi.fn(),
+      unref: vi.fn()
+    })
+    const gracefulKiller = Object.assign(new EventEmitter(), { kill: vi.fn(), unref: vi.fn() })
+    const spawnTreeKiller = vi.fn(() => gracefulKiller)
+    const stopController = new AbortController()
+    const deadlineController = new AbortController()
+    try {
+      const resultPromise = runRecipeCommand({
+        command: 'destroy',
+        repoPath: makeRepo(),
+        mode: 'destroy',
+        resultSchemaVersion: 1,
+        context: { recipeId: 'cloud-sandbox', repoPath: makeRepo() },
+        signal: stopController.signal,
+        forceAbortSignal: deadlineController.signal,
+        spawnCommand: vi.fn(() => child) as never,
+        spawnTreeKiller: spawnTreeKiller as never
+      })
+
+      stopController.abort()
+      child.emit('close', null, 'SIGTERM')
+      deadlineController.abort()
+      expect(spawnTreeKiller).toHaveBeenCalledOnce()
+
+      gracefulKiller.emit('close', 1, null)
+      await expect(resultPromise).resolves.toMatchObject({
+        aborted: true,
+        terminationFailed: true
+      })
+      expect(spawnTreeKiller).toHaveBeenCalledOnce()
     } finally {
       restorePlatform()
     }

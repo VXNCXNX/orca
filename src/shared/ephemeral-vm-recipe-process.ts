@@ -68,6 +68,8 @@ export async function runRecipeCommand(args: {
     let aborted = false
     let forceAborting = false
     let gracefulTerminationConfirmed = false
+    let gracefulTerminationSettled = false
+    let gracefulTreeKillerController: AbortController | undefined
     let closeResult: ProcessRunResult | undefined
     let forceKillTimer: ReturnType<typeof setTimeout> | undefined
     let treeExitCheckTimer: ReturnType<typeof setTimeout> | undefined
@@ -105,6 +107,12 @@ export async function runRecipeCommand(args: {
       if (settled || forceAborting) {
         return
       }
+      if (process.platform === 'win32' && closeResult && !gracefulTerminationConfirmed) {
+        if (gracefulTerminationSettled) {
+          finish({ ...closeResult, terminationFailed: true })
+        }
+        return
+      }
       forceAborting = true
       aborted = true
       if (forceKillTimer) {
@@ -113,6 +121,7 @@ export async function runRecipeCommand(args: {
       if (treeExitCheckTimer) {
         clearTimeout(treeExitCheckTimer)
       }
+      gracefulTreeKillerController?.abort()
       void terminateRecipeProcess(child, true, args.spawnTreeKiller).then((confirmed) => {
         finish({
           stdout,
@@ -136,7 +145,13 @@ export async function runRecipeCommand(args: {
         finish(closeResult)
         return
       }
-      if (process.platform === 'win32' || treeExitCheckTimer) {
+      if (process.platform === 'win32') {
+        if (gracefulTerminationSettled) {
+          finish({ ...closeResult, terminationFailed: true })
+        }
+        return
+      }
+      if (treeExitCheckTimer) {
         return
       }
       treeExitCheckTimer = setTimeout(() => {
@@ -157,8 +172,15 @@ export async function runRecipeCommand(args: {
         forceAbort()
       }, CANCEL_FORCE_KILL_DELAY_MS)
       forceKillTimer.unref()
-      void terminateRecipeProcess(child, false, args.spawnTreeKiller).then((confirmed) => {
+      gracefulTreeKillerController = new AbortController()
+      void terminateRecipeProcess(
+        child,
+        false,
+        args.spawnTreeKiller,
+        gracefulTreeKillerController.signal
+      ).then((confirmed) => {
         gracefulTerminationConfirmed = confirmed
+        gracefulTerminationSettled = true
         finishStoppedProcessTree()
       })
     }
