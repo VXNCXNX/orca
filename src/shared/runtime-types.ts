@@ -162,6 +162,8 @@ export type RuntimeNativeChatLaunchDraftResolution = {
 }
 
 export type RuntimeSyncWindowGraphResult = RuntimeStatus & {
+  /** False means persisted orchestration context was intentionally not loaded. */
+  agentOrchestrationReady?: boolean
   /** Main owns terminal handles/dispatches, so renderer graph sync returns the
    *  parent metadata needed by title-derived agent rows without name guessing. */
   agentOrchestrationByPaneKey?: Record<string, AgentStatusOrchestrationContext>

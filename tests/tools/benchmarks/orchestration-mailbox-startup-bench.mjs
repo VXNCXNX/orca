@@ -152,10 +152,12 @@ function parseStartupLine(line) {
   }
   const time = /(?:^|\s)t=(\d+(?:\.\d+)?)(?:\s|$)/.exec(match[2])
   const maxGap = /(?:^|\s)maxGapMs=(\d+(?:\.\d+)?)(?:\s|$)/.exec(match[2])
+  const maxGapAt = /(?:^|\s)maxGapAt=(\d+(?:\.\d+)?)(?:\s|$)/.exec(match[2])
   return {
     event: match[1],
     time: time ? Number(time[1]) : null,
-    maxGapMs: maxGap ? Number(maxGap[1]) : null
+    maxGapMs: maxGap ? Number(maxGap[1]) : null,
+    maxGapAt: maxGapAt ? Number(maxGapAt[1]) : null
   }
 }
 
@@ -248,9 +250,9 @@ function launchElectron(profilePath) {
         const hasPostLoadStall = events.some(
           (entry) =>
             entry.event === 'event-loop-stall' &&
-            entry.time !== null &&
+            entry.maxGapAt !== null &&
             didFinishLoad !== null &&
-            entry.time >= didFinishLoad
+            entry.maxGapAt >= didFinishLoad
         )
         if (didFinishLoad !== null && graphReady !== null && hasPostLoadStall) {
           finish()
@@ -303,8 +305,8 @@ async function main() {
     const postLoadStalls = events.filter(
       (entry) =>
         entry.event === 'event-loop-stall' &&
-        entry.time !== null &&
-        entry.time >= didFinishLoad &&
+        entry.maxGapAt !== null &&
+        entry.maxGapAt >= didFinishLoad &&
         entry.maxGapMs !== null
     )
     if (postLoadStalls.length === 0) {

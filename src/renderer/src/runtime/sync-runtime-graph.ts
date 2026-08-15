@@ -847,7 +847,11 @@ async function syncRuntimeGraph(): Promise<void> {
     // leaves the memo behind, so the retry resends every worktree in full.
     commitMobileSessionPublication(mobileSessionTabs, result?.mobileSessionResyncWorktrees)
     const currentState = getStoreState()
-    currentState?.setRuntimeAgentOrchestrationByPaneKey?.(result?.agentOrchestrationByPaneKey ?? {})
+    if (result?.agentOrchestrationReady !== false) {
+      currentState?.setRuntimeAgentOrchestrationByPaneKey?.(
+        result?.agentOrchestrationByPaneKey ?? {}
+      )
+    }
     for (const resolution of result?.nativeChatLaunchDraftResolutions ?? []) {
       if (currentState) {
         applyNativeChatLaunchDraftResolved(currentState, {

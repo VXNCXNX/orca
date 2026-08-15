@@ -55,6 +55,7 @@ import {
 } from '../hooks'
 import { getBaseRefDefault, getBranchConflictKind } from '../git/repo'
 import { OrchestrationDb } from './orchestration/db'
+import SyncDatabase from '../sqlite/sync-database'
 import type { MessagePriority, MessageRow, MessageType } from './orchestration/types'
 import {
   AUTHORITATIVE_TERMINAL_SNAPSHOT_TIMEOUT_MS,
@@ -21091,19 +21092,23 @@ describe('OrcaRuntimeService', () => {
     const flushOrThrow = vi.fn(() => {
       throw new Error('synchronous persistence must not run')
     })
+    const tempRoot = await mkdtemp(join(tmpdir(), 'orca-missing-worker-recovery-'))
+    const dbPath = join(tempRoot, 'orchestration.db')
     const runtime = new OrcaRuntimeService(
       { ...runtimeStore, flushOrThrow, flushPendingOrThrowAsync } as never,
       undefined,
-      { canRecoverPersistentLocalPtys: () => true }
+      { canRecoverPersistentLocalPtys: () => true, getOrchestrationDbPath: () => dbPath }
     )
-    const db = new OrchestrationDb(':memory:')
+    const fixtureDb = new OrchestrationDb(dbPath)
+    let fixtureOpen = true
+    let runtimeDb: OrchestrationDb | null = null
     try {
-      const task = db.createTask({ spec: 'continue after missing worker recovery' })
-      const started = db.createStartingWorkerDispatch({
+      const task = fixtureDb.createTask({ spec: 'continue after missing worker recovery' })
+      const started = fixtureDb.createStartingWorkerDispatch({
         taskId: task.id,
         startOptions: { topology: 'current', agent: 'codex' }
       })
-      db.prepareStartingWorkerAuthority({
+      fixtureDb.prepareStartingWorkerAuthority({
         dispatchId: started.dispatch.id,
         handle: 'term_missing_worker',
         paneKey: workerPaneKey,
@@ -21112,8 +21117,17 @@ describe('OrcaRuntimeService', () => {
         setupState: 'not_applicable',
         effects: []
       })
-      db.markWorkerDispatchReady(started.dispatch.id)
-      runtime.setOrchestrationDb(db)
+      fixtureDb.markWorkerDispatchReady(started.dispatch.id)
+      fixtureDb.close()
+      fixtureOpen = false
+      const raw = new SyncDatabase(dbPath)
+      raw.exec(`
+        DROP INDEX idx_messages_undelivered_direct_run;
+        DROP INDEX idx_messages_unread_current_inbox;
+        DROP INDEX idx_messages_unread_current_inbox_type;
+        DROP INDEX idx_messages_unread_current_run_type;
+      `)
+      raw.close()
       runtime.setPtyController({
         write: vi.fn(() => true),
         kill: vi.fn(() => true),
@@ -21123,12 +21137,31 @@ describe('OrcaRuntimeService', () => {
       })
       const resolveLegacyWorkerTerminalRecovery = vi.fn()
       runtime.setNotifier({ resolveLegacyWorkerTerminalRecovery } as never)
+      expect(runtime.syncWindowGraph(1, { tabs: [], leaves: [] }).agentOrchestrationReady).toBe(
+        false
+      )
 
       const recovery = runtime.reconcileLegacyWorkerTerminals()
       await durableWriteStarted.promise
 
       expect(resolveLegacyWorkerTerminalRecovery).not.toHaveBeenCalled()
-      expect(db.getDispatchContextById(started.dispatch.id)?.status).toBe('dispatched')
+      const beforeMutation = new SyncDatabase(dbPath, { readonly: true, fileMustExist: true })
+      expect(
+        beforeMutation
+          .prepare('SELECT status FROM dispatch_contexts WHERE id = ?')
+          .get(started.dispatch.id)
+      ).toEqual({ status: 'dispatched' })
+      expect(
+        beforeMutation
+          .prepare(
+            `SELECT count(*) AS count FROM sqlite_master WHERE type = 'index' AND name IN (
+              'idx_messages_undelivered_direct_run', 'idx_messages_unread_current_inbox',
+              'idx_messages_unread_current_inbox_type', 'idx_messages_unread_current_run_type'
+            )`
+          )
+          .get()
+      ).toEqual({ count: 0 })
+      beforeMutation.close()
       durableWrite.resolve()
 
       await expect(recovery).resolves.toMatchObject({
@@ -21142,12 +21175,13 @@ describe('OrcaRuntimeService', () => {
         drainToStableGeneration: false
       })
       expect(flushOrThrow).not.toHaveBeenCalled()
-      expect(db.getDispatchContextById(started.dispatch.id)).toMatchObject({
+      runtimeDb = runtime.getOrchestrationDb()
+      expect(runtimeDb.getDispatchContextById(started.dispatch.id)).toMatchObject({
         status: 'failed',
         failure_count: 1
       })
-      expect(db.getWorkerDispatch(started.dispatch.id)?.state).toBe('abandoned')
-      expect(db.getTask(task.id)?.status).toBe('ready')
+      expect(runtimeDb.getWorkerDispatch(started.dispatch.id)?.state).toBe('abandoned')
+      expect(runtimeDb.getTask(task.id)?.status).toBe('ready')
       expect(getSession().sleepingAgentSessionsByPaneKey?.[workerPaneKey]).toBeUndefined()
       expect(resolveLegacyWorkerTerminalRecovery).toHaveBeenCalledWith(
         workerPaneKey,
@@ -21156,7 +21190,11 @@ describe('OrcaRuntimeService', () => {
       )
       expect(resolveLegacyWorkerTerminalRecovery).toHaveBeenCalledWith(workerPaneKey, 'exited')
     } finally {
-      db.close()
+      if (fixtureOpen) {
+        fixtureDb.close()
+      }
+      runtimeDb?.close()
+      await rm(tempRoot, { recursive: true, force: true })
     }
   })
 

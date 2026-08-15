@@ -133,6 +133,7 @@ import {
   type LegacyWorkerTerminalRecoveryPlan
 } from './orchestration/orchestration-legacy-worker-terminal-recovery'
 import { readLegacyWorkerTerminalRecoveryRows } from './orchestration/orchestration-legacy-worker-recovery-reader'
+import { hasRequestedWorkerTerminalReleaseBacklog } from './orchestration/orchestration-worker-terminal-release-reader'
 import {
   buildObservedSetupCommand,
   createSetupCompletionScanner
@@ -3994,6 +3995,14 @@ export class OrcaRuntimeService {
 
   private scheduleRequestedWorkerTerminalReleaseReconciliation(): void {
     if (!this._orchestrationDb) {
+      try {
+        if (!hasRequestedWorkerTerminalReleaseBacklog(this.getOrchestrationDbPathFn())) {
+          return
+        }
+        this.getOrchestrationDb()
+      } catch (error) {
+        console.warn('[orchestration] worker terminal release readiness failed', { error })
+      }
       return
     }
     void reconcileRequestedWorkerTerminalReleases(this).catch((error) => {
@@ -4275,11 +4284,8 @@ export class OrcaRuntimeService {
     if (candidate.dispatchStatus !== 'pending' && candidate.dispatchStatus !== 'dispatched') {
       return true
     }
-    if (!this._orchestrationDb) {
-      return false
-    }
     try {
-      this._orchestrationDb.reconcileMissingWorkerTerminal(
+      this.getOrchestrationDb().reconcileMissingWorkerTerminal(
         candidate.dispatchId,
         'The assigned worker terminal is no longer live after orchestration recovery.'
       )
@@ -5954,6 +5960,7 @@ export class OrcaRuntimeService {
     }
     return {
       ...this.getStatus(),
+      agentOrchestrationReady: this._orchestrationDb !== null,
       ...(agentOrchestrationByPaneKey ? { agentOrchestrationByPaneKey } : {}),
       ...(nativeChatLaunchDraftResolutions.length > 0 ? { nativeChatLaunchDraftResolutions } : {}),
       ...(mobileSessionResyncWorktrees.size > 0
@@ -29627,11 +29634,10 @@ export class OrcaRuntimeService {
   private async resolveLineageCandidateForTaskId(
     taskId: string
   ): Promise<WorktreeLineageCandidate | null> {
-    const db = this.getOrchestrationDbIfAvailable()
-    const dispatch = db?.getDispatchContext(taskId)
+    const db = this.getOrchestrationDb()
+    const dispatch = db.getDispatchContext(taskId)
     // Why: agent-created tasks may never be dispatched, but the creating terminal still identifies the parent workspace.
-    const parentHandle =
-      dispatch?.assignee_handle ?? db?.getTask(taskId)?.created_by_terminal_handle
+    const parentHandle = dispatch?.assignee_handle ?? db.getTask(taskId)?.created_by_terminal_handle
     if (!parentHandle) {
       return null
     }
@@ -29653,7 +29659,7 @@ export class OrcaRuntimeService {
     }
   }
 
-  private getOrchestrationDbIfAvailable(): OrchestrationDb | null {
+  private getOpenedOrchestrationDb(): OrchestrationDb | null {
     return this._orchestrationDb
   }
 
@@ -32035,7 +32041,7 @@ export class OrcaRuntimeService {
   private buildAgentOrchestrationByPaneKey():
     | Record<string, AgentStatusOrchestrationContext>
     | undefined {
-    const db = this.getOrchestrationDbIfAvailable()
+    const db = this.getOpenedOrchestrationDb()
     if (!db) {
       return undefined
     }
@@ -32079,7 +32085,7 @@ export class OrcaRuntimeService {
 
   private getAgentStatusOrchestrationContextForHandle(
     handle: string,
-    db = this.getOrchestrationDbIfAvailable()
+    db = this.getOpenedOrchestrationDb()
   ): AgentStatusOrchestrationContext | undefined {
     // Why: active dispatch is authoritative for reused terminals; settled context stale-groups later work once its row is gone.
     const dispatch =
@@ -32178,7 +32184,7 @@ export class OrcaRuntimeService {
 
   private getRecentSettledDispatchForTerminal(
     handle: string,
-    db = this.getOrchestrationDbIfAvailable()
+    db = this.getOpenedOrchestrationDb()
   ): ReturnType<OrchestrationDb['getLatestDispatchForTerminal']> {
     const dispatch = db?.getLatestDispatchForTerminal?.(handle)
     if (

@@ -88,6 +88,28 @@ function startSync(
 }
 
 describe('mobile session graph payload partition', () => {
+  it('retains orchestration context while a new host reports enrichment not ready', async () => {
+    const state = makeState('orchestration-not-ready', 0)
+    state.setRuntimeAgentOrchestrationByPaneKey = vi.fn()
+    const syncWindowGraph = vi.fn().mockResolvedValue({ agentOrchestrationReady: false })
+    startSync(state, syncWindowGraph)
+
+    await flushSync()
+
+    expect(state.setRuntimeAgentOrchestrationByPaneKey).not.toHaveBeenCalled()
+  })
+
+  it('treats an omitted readiness field from an older host as ready', async () => {
+    const state = makeState('orchestration-old-host', 0)
+    state.setRuntimeAgentOrchestrationByPaneKey = vi.fn()
+    const syncWindowGraph = vi.fn().mockResolvedValue({})
+    startSync(state, syncWindowGraph)
+
+    await flushSync()
+
+    expect(state.setRuntimeAgentOrchestrationByPaneKey).toHaveBeenCalledWith({})
+  })
+
   it('withholds every unchanged worktree from the republished payload', async () => {
     const syncWindowGraph = vi.fn().mockResolvedValue({})
     startSync(makeState('a', 3), syncWindowGraph)

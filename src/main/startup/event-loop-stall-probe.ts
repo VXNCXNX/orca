@@ -16,19 +16,23 @@ export function startEventLoopStallProbe(): void {
   const started = last
   let lastReport = last
   let windowMaxGapMs = 0
+  let windowMaxGapAt = last
   const timer = setInterval(() => {
     const now = performance.now()
     const gap = now - last - TICK_MS
     last = now
     if (gap > windowMaxGapMs) {
       windowMaxGapMs = gap
+      windowMaxGapAt = now
     }
     if (now - lastReport >= REPORT_EVERY_MS) {
       logStartupDiagnostic('event-loop-stall', {
         t: Math.round(now),
-        maxGapMs: Math.max(0, Math.round(windowMaxGapMs))
+        maxGapMs: Math.max(0, Math.round(windowMaxGapMs)),
+        maxGapAt: Math.round(windowMaxGapAt)
       })
       windowMaxGapMs = 0
+      windowMaxGapAt = now
       lastReport = now
     }
     if (now - started >= STOP_AFTER_MS) {
