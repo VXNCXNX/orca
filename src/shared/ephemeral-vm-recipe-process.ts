@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import type { EphemeralVmRecipeContext } from './ephemeral-vm-recipe-runner'
 import {
+  hasRecipeProcessExited,
   isRecipeProcessTreeAlive,
   releaseRecipeProcessHandles,
   terminateRecipeProcess
@@ -73,6 +74,7 @@ export async function runRecipeCommand(args: {
     let gracefulTreeKillerController: AbortController | undefined
     let stoppedResult: ProcessRunResult | undefined
     let processExited = false
+    let processClosed = false
     let forceKillTimer: ReturnType<typeof setTimeout> | undefined
     let treeExitCheckTimer: ReturnType<typeof setTimeout> | undefined
     const finish = (result: ProcessRunResult): void => {
@@ -106,22 +108,22 @@ export async function runRecipeCommand(args: {
       reject(error)
     }
     const finishUnconfirmedExitedProcess = (): void => {
-      if (!stoppedResult || settled) {
-        return
+      const result = stoppedResult ?? {
+        stdout,
+        stderr,
+        exitCode: child.exitCode,
+        signal: child.signalCode
       }
-      finish({ ...stoppedResult, aborted: true, terminationFailed: true })
+      finish({ ...result, aborted: true, terminationFailed: true })
       releaseRecipeProcessHandles(child)
     }
     const forceAbort = (): void => {
       if (settled || forceAborting) {
         return
       }
-      const wasAborted = aborted
       aborted = true
-      if (process.platform === 'win32' && processExited && !gracefulTerminationConfirmed) {
-        if (!wasAborted || gracefulTerminationSettled) {
-          finishUnconfirmedExitedProcess()
-        }
+      if (hasRecipeProcessExited(child, processExited) && !processClosed) {
+        finishUnconfirmedExitedProcess()
         return
       }
       forceAborting = true
@@ -145,7 +147,7 @@ export async function runRecipeCommand(args: {
       })
     }
     const finishStoppedProcessTree = (): void => {
-      if (!stoppedResult || settled || forceAborting) {
+      if (!stoppedResult || !processClosed || settled || forceAborting) {
         return
       }
       if (gracefulTerminationConfirmed || !isRecipeProcessTreeAlive(child)) {
@@ -232,6 +234,7 @@ export async function runRecipeCommand(args: {
         signal,
         ...(aborted ? { aborted: true as const } : {})
       }
+      processClosed = true
       if (!aborted) {
         finish(result)
         return

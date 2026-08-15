@@ -61,7 +61,7 @@ describe('terminateRecipeProcess', () => {
     let livenessChecks = 0
     vi.spyOn(process, 'kill').mockImplementation((_pid, signal) => {
       if (signal === 0 && livenessChecks++ > 0) {
-        throw new Error('gone')
+        throw Object.assign(new Error('gone'), { code: 'ESRCH' })
       }
       return true
     })
@@ -79,10 +79,15 @@ describe('terminateRecipeProcess', () => {
     expect(child.kill).not.toHaveBeenCalled()
   })
 
-  it('reports a POSIX process group that survives the confirmation window', async () => {
+  it('does not treat POSIX permission denial as process-group exit', async () => {
     vi.useFakeTimers()
     const child = makeChild(124)
-    vi.spyOn(process, 'kill').mockReturnValue(true)
+    vi.spyOn(process, 'kill').mockImplementation((_pid, signal) => {
+      if (signal === 0) {
+        throw Object.assign(new Error('denied'), { code: 'EPERM' })
+      }
+      return true
+    })
 
     const termination = terminateRecipeProcess(child as never, true)
     await vi.advanceTimersByTimeAsync(RECIPE_PROCESS_TREE_TERMINATION_TIMEOUT_MS)
@@ -145,6 +150,33 @@ describe('terminateRecipeProcess', () => {
 
       await expect(result).resolves.toMatchObject({ aborted: true })
       expect(child.kill).not.toHaveBeenCalled()
+    } finally {
+      restorePlatform()
+    }
+  })
+
+  it('reports inherited Windows handles that stay open after confirmed taskkill', async () => {
+    vi.useFakeTimers()
+    const restorePlatform = setProcessPlatform('win32')
+    const child = makeChild(127)
+    const gracefulKiller = Object.assign(new EventEmitter(), { kill: vi.fn(), unref: vi.fn() })
+    const stopController = new AbortController()
+    const spawnTreeKiller = vi.fn(() => gracefulKiller)
+    try {
+      const result = runWindowsRecipe(child, {
+        signal: stopController.signal,
+        spawnTreeKiller
+      })
+
+      stopController.abort()
+      gracefulKiller.emit('close', 0, null)
+      child.emit('exit', 0, null)
+      await vi.advanceTimersByTimeAsync(5_000)
+
+      await expect(result).resolves.toMatchObject({ aborted: true, terminationFailed: true })
+      expect(spawnTreeKiller).toHaveBeenCalledOnce()
+      expect(child.kill).not.toHaveBeenCalled()
+      expect(child.unref).toHaveBeenCalledOnce()
     } finally {
       restorePlatform()
     }

@@ -78,13 +78,28 @@ export function releaseRecipeProcessHandles(child: ChildProcessWithoutNullStream
   child.unref()
 }
 
+export function hasRecipeProcessExited(
+  child: ChildProcessWithoutNullStreams,
+  observedExit: boolean
+): boolean {
+  return (
+    observedExit ||
+    (child.exitCode !== null && child.exitCode !== undefined) ||
+    (child.signalCode !== null && child.signalCode !== undefined)
+  )
+}
+
 function isPosixProcessGroupAlive(pid: number): boolean {
   try {
     process.kill(-pid, 0)
     return true
-  } catch {
-    return false
+  } catch (error) {
+    return !isProcessNotFoundError(error)
   }
+}
+
+function isProcessNotFoundError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ESRCH'
 }
 
 function terminateWindowsRecipeProcess(
