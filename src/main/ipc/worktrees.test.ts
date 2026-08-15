@@ -193,19 +193,31 @@ vi.mock('./ssh', () => ({
 }))
 
 vi.mock('../hooks', () => ({
-  buildPosixRunnerScript: buildPosixRunnerScriptMock,
-  buildWindowsRunnerScript: buildWindowsRunnerScriptMock,
-  createIssueCommandRunnerScript: createIssueCommandRunnerScriptMock,
-  createSetupRunnerScript: createSetupRunnerScriptMock,
   getEffectiveHooks: getEffectiveHooksMock,
-  getEffectiveHooksFromConfig: getEffectiveHooksFromConfigMock,
-  getDefaultTabsLaunch: getDefaultTabsLaunchMock,
-  getSetupRunnerEnvVars: getSetupRunnerEnvVarsMock,
   loadHooks: loadHooksMock,
   parseOrcaYaml: parseOrcaYamlMock,
-  resolveSetupRunnerShell: resolveSetupRunnerShellMock,
   runHook: runHookMock,
-  hasHooksFile: hasHooksFileMock,
+  hasHooksFile: hasHooksFileMock
+}))
+
+vi.mock('../setup-runner-script-text', () => ({
+  buildPosixRunnerScript: buildPosixRunnerScriptMock,
+  buildWindowsRunnerScript: buildWindowsRunnerScriptMock
+}))
+
+vi.mock('../worktree-runner-script', () => ({
+  createIssueCommandRunnerScript: createIssueCommandRunnerScriptMock,
+  createSetupRunnerScript: createSetupRunnerScriptMock,
+  resolveSetupRunnerShell: resolveSetupRunnerShellMock
+}))
+
+vi.mock('../setup-hook-env-vars', () => ({
+  getSetupRunnerEnvVars: getSetupRunnerEnvVarsMock
+}))
+
+vi.mock('../effective-hook-config', () => ({
+  getEffectiveHooksFromConfig: getEffectiveHooksFromConfigMock,
+  getDefaultTabsLaunch: getDefaultTabsLaunchMock,
   shouldRunSetupForCreate: shouldRunSetupForCreateMock
 }))
 

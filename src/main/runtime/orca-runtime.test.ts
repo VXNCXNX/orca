@@ -40,18 +40,13 @@ import {
   WORKTREE_TEARDOWN_RPC_MARGIN_MS
 } from './worktree-teardown'
 import { clearSubmodulePathsCacheForTests, listSubmodulePaths } from '../git/status'
+import { getEffectiveHooks, hasHooksFile, loadHooks, parseOrcaYaml, runHook } from '../hooks'
+import { createSetupRunnerScript, resolveSetupRunnerShell } from '../worktree-runner-script'
 import {
-  createSetupRunnerScript,
-  getEffectiveHooks,
   getEffectiveHooksFromConfig,
   getDefaultTabsLaunch,
-  hasHooksFile,
-  loadHooks,
-  parseOrcaYaml,
-  resolveSetupRunnerShell,
-  runHook,
   shouldRunSetupForCreate
-} from '../hooks'
+} from '../effective-hook-config'
 import { getBaseRefDefault, getBranchConflictKind } from '../git/repo'
 import { OrchestrationDb } from './orchestration/db'
 import type { MessagePriority, MessageRow, MessageType } from './orchestration/types'
@@ -464,28 +459,40 @@ vi.mock('../agent-trust-presets', () => ({
 }))
 
 vi.mock('../hooks', () => ({
-  buildPosixRunnerScript: (script: string) => `#!/usr/bin/env bash\nset -e\n${script}\n`,
-  buildWindowsRunnerScript: (script: string) => `@echo off\r\n${script}\r\n`,
-  createSetupRunnerScript: vi.fn(),
   getEffectiveHooks: vi.fn().mockReturnValue(null),
+  loadHooks: vi.fn().mockReturnValue(null),
+  runHook: vi.fn().mockResolvedValue({ success: true, output: '' }),
+  hasHooksFile: vi.fn().mockReturnValue(false),
+  parseOrcaYaml: vi.fn().mockReturnValue(null)
+}))
+
+vi.mock('../setup-runner-script-text', () => ({
+  buildPosixRunnerScript: (script: string) => `#!/usr/bin/env bash\nset -e\n${script}\n`,
+  buildWindowsRunnerScript: (script: string) => `@echo off\r\n${script}\r\n`
+}))
+
+vi.mock('../worktree-runner-script', () => ({
+  createSetupRunnerScript: vi.fn(),
+  resolveSetupRunnerShell: vi.fn().mockReturnValue(undefined)
+}))
+
+vi.mock('../setup-hook-env-vars', () => ({
+  getSetupRunnerEnvVars: (_repo: never, worktreePath: string) => ({
+    ORCA_ROOT_PATH: '/remote/repo',
+    ORCA_WORKTREE_PATH: worktreePath
+  })
+}))
+
+vi.mock('../effective-hook-config', () => ({
   getEffectiveHooksFromConfig: vi.fn().mockReturnValue(null),
   getDefaultTabCommandTrustContent: vi.fn(
     (hooks: { scripts?: { setup?: string } } | null) => hooks?.scripts?.setup?.trim() ?? ''
   ),
   getDefaultTabsLaunch: vi.fn().mockReturnValue(undefined),
-  getSetupRunnerEnvVars: (_repo: never, worktreePath: string) => ({
-    ORCA_ROOT_PATH: '/remote/repo',
-    ORCA_WORKTREE_PATH: worktreePath
-  }),
-  loadHooks: vi.fn().mockReturnValue(null),
-  resolveSetupRunnerShell: vi.fn().mockReturnValue(undefined),
-  runHook: vi.fn().mockResolvedValue({ success: true, output: '' }),
   shouldRunSetupForCreate: vi
     .fn()
     .mockImplementation((_repo: never, decision: string) => decision === 'run'),
-  getEffectiveSetupRunPolicy: vi.fn().mockReturnValue('auto'),
-  hasHooksFile: vi.fn().mockReturnValue(false),
-  parseOrcaYaml: vi.fn().mockReturnValue(null)
+  getEffectiveSetupRunPolicy: vi.fn().mockReturnValue('auto')
 }))
 
 vi.mock('../ipc/worktree-logic', async (importOriginal) => {

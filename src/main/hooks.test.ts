@@ -4,7 +4,8 @@ import type * as GitRunner from './git/runner'
 
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { getDefaultTabsLaunch, parseOrcaYaml } from './hooks'
+import { parseOrcaYaml } from './hooks'
+import { getDefaultTabsLaunch } from './effective-hook-config'
 
 // Mock fs and path used by loadHooks
 vi.mock('fs', () => ({
@@ -481,7 +482,7 @@ describe('readIssueCommand', () => {
       return ''
     })
 
-    const { readIssueCommand } = await import('./hooks')
+    const { readIssueCommand } = await import('./issue-command-file')
     expect(readIssueCommand(TEST_REPO_PATH)).toEqual({
       localContent: 'local command',
       sharedContent: 'shared command',
@@ -501,7 +502,7 @@ describe('readIssueCommand', () => {
       return ''
     })
 
-    const { readIssueCommand } = await import('./hooks')
+    const { readIssueCommand } = await import('./issue-command-file')
     expect(readIssueCommand(TEST_REPO_PATH)).toEqual({
       localContent: null,
       sharedContent: 'shared command',
@@ -525,7 +526,7 @@ describe('writeIssueCommand', () => {
       return ''
     })
 
-    const { writeIssueCommand } = await import('./hooks')
+    const { writeIssueCommand } = await import('./issue-command-file')
     writeIssueCommand(TEST_REPO_PATH, 'local command')
 
     expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
@@ -541,7 +542,7 @@ describe('writeIssueCommand', () => {
   })
 
   it('deletes the local override when the override is cleared', async () => {
-    const { writeIssueCommand } = await import('./hooks')
+    const { writeIssueCommand } = await import('./issue-command-file')
     const fs = await import('node:fs')
     writeIssueCommand(TEST_REPO_PATH, '   ')
 
@@ -553,7 +554,7 @@ describe('writeIssueCommand', () => {
 
 describe('runner script builders', () => {
   it('builds Windows runners for newline-heavy scripts without line-array splitting', async () => {
-    const { buildWindowsRunnerScript } = await import('./hooks')
+    const { buildWindowsRunnerScript } = await import('./setup-runner-script-text')
     const script = `${'\r\n'.repeat(10_000)}pnpm install\r\nnpm run build\n`
     const splitSpy = vi.spyOn(String.prototype, 'split')
     const replaceSpy = vi.spyOn(String.prototype, 'replace')
@@ -584,7 +585,7 @@ describe('runner script builders', () => {
   })
 
   it('builds POSIX runners without regex-wide CRLF normalization', async () => {
-    const { buildPosixRunnerScript } = await import('./hooks')
+    const { buildPosixRunnerScript } = await import('./setup-runner-script-text')
     const script = `${'echo setup\r\n'.repeat(10_000)}echo done`
     const replaceSpy = vi.spyOn(String.prototype, 'replace')
 
@@ -1182,7 +1183,7 @@ describe('runHook', () => {
     })
 
     try {
-      const { createSetupRunnerScript } = await import('./hooks')
+      const { createSetupRunnerScript } = await import('./worktree-runner-script')
       const result = createSetupRunnerScript(
         {
           ...makeRepo(),
@@ -1291,7 +1292,7 @@ describe('createSetupRunnerScript', () => {
     Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
 
     try {
-      const { createSetupRunnerScript } = await import('./hooks')
+      const { createSetupRunnerScript } = await import('./worktree-runner-script')
       const result = createSetupRunnerScript(
         makeRepo(),
         'C:\\repo-worktree',
@@ -1331,7 +1332,7 @@ describe('createSetupRunnerScript', () => {
     Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
 
     try {
-      const { createSetupRunnerScript } = await import('./hooks')
+      const { createSetupRunnerScript } = await import('./worktree-runner-script')
       const result = createSetupRunnerScript(
         makeRepo(),
         'C:\\repo-worktree',
@@ -1369,7 +1370,7 @@ describe('createSetupRunnerScript', () => {
     Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
 
     try {
-      const { createSetupRunnerScript } = await import('./hooks')
+      const { createSetupRunnerScript } = await import('./worktree-runner-script')
       const { buildSetupRunnerCommand } = await import('../shared/setup-runner-command')
       const result = createSetupRunnerScript(
         makeRepo(),
@@ -1402,7 +1403,7 @@ describe('createSetupRunnerScript', () => {
     Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
 
     try {
-      const { createSetupRunnerScript } = await import('./hooks')
+      const { createSetupRunnerScript } = await import('./worktree-runner-script')
       createSetupRunnerScript(
         makeRepo(),
         'C:\\repo-worktree',
@@ -1431,7 +1432,7 @@ describe('createSetupRunnerScript', () => {
     Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
 
     try {
-      const { createSetupRunnerScript } = await import('./hooks')
+      const { createSetupRunnerScript } = await import('./worktree-runner-script')
       const result = createSetupRunnerScript(
         makeRepo(),
         'C:\\repo-worktree',
@@ -1472,7 +1473,7 @@ describe('createSetupRunnerScript', () => {
     Object.defineProperty(process, 'platform', { configurable: true, value: 'linux' })
 
     try {
-      const { createSetupRunnerScript } = await import('./hooks')
+      const { createSetupRunnerScript } = await import('./worktree-runner-script')
       const result = createSetupRunnerScript(makeRepo(), '/test/worktree', 'pnpm install')
 
       expect(gitExecFileSyncMock).toHaveBeenCalledWith(
@@ -1494,7 +1495,7 @@ describe('createSetupRunnerScript', () => {
   it('omits waitForAgentStartup unless the repo explicitly waits for setup', async () => {
     gitExecFileSyncMock.mockReset()
     gitExecFileSyncMock.mockReturnValue('/test/repo/.git/orca/setup-runner.sh\n')
-    const { createSetupRunnerScript } = await import('./hooks')
+    const { createSetupRunnerScript } = await import('./worktree-runner-script')
 
     expect(
       createSetupRunnerScript(makeRepo(), '/test/worktree', 'echo setup').waitForAgentStartup
@@ -1512,7 +1513,7 @@ describe('createSetupRunnerScript', () => {
   it('marks setup-runner terminals for the always-on credential guard', async () => {
     gitExecFileSyncMock.mockReset()
     gitExecFileSyncMock.mockReturnValue('/test/repo/.git/orca/setup-runner.sh\n')
-    const { createSetupRunnerScript } = await import('./hooks')
+    const { createSetupRunnerScript } = await import('./worktree-runner-script')
 
     const setup = createSetupRunnerScript(makeRepo(), '/test/worktree', 'git fetch')
 
@@ -1545,7 +1546,7 @@ describe('createIssueCommandRunnerScript', () => {
     Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
 
     try {
-      const { createIssueCommandRunnerScript } = await import('./hooks')
+      const { createIssueCommandRunnerScript } = await import('./worktree-runner-script')
       const result = createIssueCommandRunnerScript(
         makeRepo(),
         'C:\\repo-worktree',
@@ -1576,7 +1577,7 @@ describe('createIssueCommandRunnerScript', () => {
     Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
 
     try {
-      const { createIssueCommandRunnerScript } = await import('./hooks')
+      const { createIssueCommandRunnerScript } = await import('./worktree-runner-script')
       const result = createIssueCommandRunnerScript(
         makeRepo(),
         'C:\\repo-worktree',
@@ -1603,7 +1604,7 @@ describe('createIssueCommandRunnerScript', () => {
     Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
 
     try {
-      const { createIssueCommandRunnerScript } = await import('./hooks')
+      const { createIssueCommandRunnerScript } = await import('./worktree-runner-script')
       const result = createIssueCommandRunnerScript(
         makeRepo(),
         'C:\\repo-worktree',
@@ -1627,7 +1628,7 @@ describe('resolveSetupRunnerShell', () => {
   }
 
   it('maps git-bash to POSIX setup launch metadata on Windows', async () => {
-    const { resolveSetupRunnerShell } = await import('./hooks')
+    const { resolveSetupRunnerShell } = await import('./worktree-runner-script')
 
     expect(
       resolveSetupRunnerShell({ terminalWindowsShell: 'git-bash' }, 'win32', installedGitBash)
@@ -1637,7 +1638,7 @@ describe('resolveSetupRunnerShell', () => {
   })
 
   it('falls back to the cmd runner when the git-bash setting has no installed Git Bash', async () => {
-    const { resolveSetupRunnerShell } = await import('./hooks')
+    const { resolveSetupRunnerShell } = await import('./worktree-runner-script')
 
     expect(
       resolveSetupRunnerShell({ terminalWindowsShell: 'git-bash' }, 'win32', {
@@ -1647,7 +1648,7 @@ describe('resolveSetupRunnerShell', () => {
   })
 
   it('keeps the cmd runner for a non-Git bash such as Cygwin', async () => {
-    const { resolveSetupRunnerShell } = await import('./hooks')
+    const { resolveSetupRunnerShell } = await import('./worktree-runner-script')
 
     expect(
       resolveSetupRunnerShell({ terminalWindowsShell: 'C:\\cygwin64\\bin\\bash.exe' }, 'win32', {
@@ -1657,7 +1658,7 @@ describe('resolveSetupRunnerShell', () => {
   })
 
   it('keeps the cmd runner for a bare bash whose flavor cannot be resolved', async () => {
-    const { resolveSetupRunnerShell } = await import('./hooks')
+    const { resolveSetupRunnerShell } = await import('./worktree-runner-script')
 
     expect(
       resolveSetupRunnerShell({ terminalWindowsShell: 'bash' }, 'win32', {
@@ -1667,7 +1668,7 @@ describe('resolveSetupRunnerShell', () => {
   })
 
   it('uses the POSIX runner for a bare bash that resolves to Git Bash', async () => {
-    const { resolveSetupRunnerShell } = await import('./hooks')
+    const { resolveSetupRunnerShell } = await import('./worktree-runner-script')
 
     expect(
       resolveSetupRunnerShell({ terminalWindowsShell: 'bash' }, 'win32', installedGitBash)
@@ -1675,7 +1676,7 @@ describe('resolveSetupRunnerShell', () => {
   })
 
   it('uses the POSIX runner for an extension-less Git Bash path', async () => {
-    const { resolveSetupRunnerShell } = await import('./hooks')
+    const { resolveSetupRunnerShell } = await import('./worktree-runner-script')
 
     expect(
       resolveSetupRunnerShell(
@@ -1687,7 +1688,7 @@ describe('resolveSetupRunnerShell', () => {
   })
 
   it('preserves the existing cmd runner for PowerShell terminals', async () => {
-    const { resolveSetupRunnerShell } = await import('./hooks')
+    const { resolveSetupRunnerShell } = await import('./worktree-runner-script')
 
     expect(
       resolveSetupRunnerShell(
@@ -1702,7 +1703,7 @@ describe('resolveSetupRunnerShell', () => {
   })
 
   it('preserves cmd setup compatibility when a Windows-host project has a WSL shell setting', async () => {
-    const { resolveSetupRunnerShell } = await import('./hooks')
+    const { resolveSetupRunnerShell } = await import('./worktree-runner-script')
 
     expect(
       resolveSetupRunnerShell({ terminalWindowsShell: 'wsl.exe' }, 'win32', installedGitBash)
@@ -1710,7 +1711,7 @@ describe('resolveSetupRunnerShell', () => {
   })
 
   it('classifies an installed explicit Git Bash executable as a POSIX runner', async () => {
-    const { resolveSetupRunnerShell } = await import('./hooks')
+    const { resolveSetupRunnerShell } = await import('./worktree-runner-script')
     const { resolveWindowsGitBashShellPath } = await import('./git-bash')
 
     expect(
@@ -1726,7 +1727,7 @@ describe('resolveSetupRunnerShell', () => {
   })
 
   it('falls back to the cmd runner when the explicit Git Bash path no longer exists', async () => {
-    const { resolveSetupRunnerShell } = await import('./hooks')
+    const { resolveSetupRunnerShell } = await import('./worktree-runner-script')
     const { resolveWindowsGitBashShellPath } = await import('./git-bash')
 
     // Regression: a stale configured path used to commit setup to a .sh runner the
@@ -1760,7 +1761,7 @@ describe('shouldRunSetupForCreate', () => {
     }) as unknown as Repo
 
   it('requires an explicit decision when the repo policy is ask', async () => {
-    const { shouldRunSetupForCreate } = await import('./hooks')
+    const { shouldRunSetupForCreate } = await import('./effective-hook-config')
 
     expect(() => shouldRunSetupForCreate(makeRepo('ask'))).toThrow(
       'Setup decision required for this repository'
@@ -1768,14 +1769,14 @@ describe('shouldRunSetupForCreate', () => {
   })
 
   it('uses the repo default when the caller inherits', async () => {
-    const { shouldRunSetupForCreate } = await import('./hooks')
+    const { shouldRunSetupForCreate } = await import('./effective-hook-config')
 
     expect(shouldRunSetupForCreate(makeRepo('run-by-default'))).toBe(true)
     expect(shouldRunSetupForCreate(makeRepo('skip-by-default'))).toBe(false)
   })
 
   it('lets the caller override the repo default per create', async () => {
-    const { shouldRunSetupForCreate } = await import('./hooks')
+    const { shouldRunSetupForCreate } = await import('./effective-hook-config')
 
     expect(shouldRunSetupForCreate(makeRepo('skip-by-default'), 'run')).toBe(true)
     expect(shouldRunSetupForCreate(makeRepo('run-by-default'), 'skip')).toBe(false)

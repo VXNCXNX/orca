@@ -8,8 +8,6 @@ inline src/cli/help.ts
 inline src/cli/index.test.ts
 inline src/main/agent-hooks/server.test.ts
 inline src/main/agent-hooks/server.ts
-inline src/main/amp/hook-service.ts
-inline src/main/antigravity/hook-service.ts
 inline src/main/automations/external-manager.ts
 inline src/main/automations/hermes-cron-output.ts
 inline src/main/browser/agent-browser-bridge.test.ts
@@ -45,7 +43,6 @@ inline src/main/codex/config-toml-trust.test.ts
 inline src/main/codex/config-toml-trust.ts
 inline src/main/codex/hook-service.test.ts
 inline src/main/codex/hook-service.ts
-inline src/main/copilot/hook-service.ts
 inline src/main/daemon/client.ts
 inline src/main/daemon/daemon-health.ts
 inline src/main/daemon/daemon-init.test.ts
@@ -76,9 +73,7 @@ inline src/main/gitlab/client-mr.test.ts
 inline src/main/gitlab/client.ts
 inline src/main/gitlab/issues.ts
 inline src/main/gitlab/work-item-details.ts
-inline src/main/hermes/hook-service.ts
 inline src/main/hooks.test.ts
-inline src/main/hooks.ts
 inline src/main/index.ts
 inline src/main/ipc/browser.ts
 inline src/main/ipc/crash-reporting.ts
@@ -168,10 +163,8 @@ inline src/main/window/createMainWindow.test.ts
 inline src/main/window/createMainWindow.ts
 inline src/main/workspace-space-analysis.ts
 inline src/preload/index.ts
-inline src/relay/agent-hook-server.ts
 inline src/relay/dispatcher.ts
 inline src/relay/external-automations-handler.ts
-inline src/relay/fs-handler.ts
 inline src/relay/git-handler.test.ts
 inline src/relay/git-handler.ts
 inline src/relay/pty-handler.test.ts
