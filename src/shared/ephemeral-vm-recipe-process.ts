@@ -22,9 +22,6 @@ export type ProcessRunResult = {
 
 export function quoteShellToken(value: string): string {
   if (process.platform === 'win32') {
-    // Inside cmd.exe double quotes, `^` is literal; an embedded `"` is escaped
-    // by doubling it. This token is only displayed for manual cleanup, so it
-    // must be valid when pasted into cmd.exe.
     return `"${value.replace(/"/g, '""')}"`
   }
   return `'${value.replace(/'/g, `'\\''`)}'`
@@ -77,17 +74,20 @@ export async function runRecipeCommand(args: {
     let processClosed = false
     let forceKillTimer: ReturnType<typeof setTimeout> | undefined
     let treeExitCheckTimer: ReturnType<typeof setTimeout> | undefined
-    const finish = (result: ProcessRunResult): void => {
-      if (settled) {
-        return
-      }
-      settled = true
+    const clearTerminationTimers = (): void => {
       if (forceKillTimer) {
         clearTimeout(forceKillTimer)
       }
       if (treeExitCheckTimer) {
         clearTimeout(treeExitCheckTimer)
       }
+    }
+    const finish = (result: ProcessRunResult): void => {
+      if (settled) {
+        return
+      }
+      settled = true
+      clearTerminationTimers()
       args.signal?.removeEventListener('abort', abort)
       args.forceAbortSignal?.removeEventListener('abort', forceAbort)
       resolve(result)
@@ -97,12 +97,7 @@ export async function runRecipeCommand(args: {
         return
       }
       settled = true
-      if (forceKillTimer) {
-        clearTimeout(forceKillTimer)
-      }
-      if (treeExitCheckTimer) {
-        clearTimeout(treeExitCheckTimer)
-      }
+      clearTerminationTimers()
       args.signal?.removeEventListener('abort', abort)
       args.forceAbortSignal?.removeEventListener('abort', forceAbort)
       reject(error)
@@ -128,12 +123,7 @@ export async function runRecipeCommand(args: {
         return
       }
       forceAborting = true
-      if (forceKillTimer) {
-        clearTimeout(forceKillTimer)
-      }
-      if (treeExitCheckTimer) {
-        clearTimeout(treeExitCheckTimer)
-      }
+      clearTerminationTimers()
       void terminateRecipeProcess(child, true, args.spawnTreeKiller).then((confirmed) => {
         finish({
           stdout,
@@ -174,6 +164,10 @@ export async function runRecipeCommand(args: {
         return
       }
       aborted = true
+      if (hasRecipeProcessExited(child, processExited)) {
+        finishUnconfirmedExitedProcess()
+        return
+      }
       forceKillTimer = setTimeout(() => {
         if (settled) {
           return

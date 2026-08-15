@@ -124,6 +124,7 @@
             "Windows deadline termination waits for taskkill confirmation and bounds nonzero or unresponsive termination without retaining the tree killer",
             "explicit Stop omits Windows force mode before escalating with force at the independent deadline",
             "an exited Windows root PID cancels its graceful tree killer, is never reused for force escalation, and settles unconfirmed",
+            "Stop refuses to start a Windows tree killer after the owned root exits",
             "an unconfirmed stopped tree produces actionable recovery instead of a benign Stop result",
             "a stopped process that ignores graceful termination is force-killed and settled"
           ]
@@ -235,7 +236,7 @@
           "command": "pnpm exec vitest run --config config/vitest.config.ts src/shared/ephemeral-vm-runtime-store.test.ts src/shared/ephemeral-vm-runtime-store-rollback.test.ts src/shared/ephemeral-vm-recipe-process.test.ts src/shared/ephemeral-vm-recipe-process-termination.test.ts src/main/ephemeral-vm-runtime-cleanup-control.test.ts src/main/ephemeral-vm-runtime-service.test.ts src/main/ephemeral-vm-failed-start-cleanup.test.ts src/main/ephemeral-vm-resume-integrity.test.ts src/main/ephemeral-vm-recipe-runner.test.ts src/main/ephemeral-vm-runtime-ssh-cleanup.test.ts src/main/ipc/ephemeral-vm-runtime-handler-cleanup.test.ts src/main/ipc/ephemeral-vm-provision-cancel.test.ts src/main/ipc/ephemeral-vm-provisioned-root-ref.test.ts src/main/ipc/ephemeral-vm.test.ts src/main/provisioned-root-ssh-adoption.test.ts src/renderer/src/components/settings/EphemeralVmRuntimesSection.test.tsx src/renderer/src/lib/ephemeral-vm-failed-create-cleanup.test.ts src/renderer/src/lib/ephemeral-vm-runtime-cleanup.test.ts src/renderer/src/lib/ephemeral-vm-workspace-target.test.ts src/renderer/src/lib/ephemeral-vm-worktree-creation.test.ts src/renderer/src/lib/provisioned-root-create-options.test.ts src/renderer/src/store/slices/repos-ephemeral-vm-cleanup-retention.test.ts",
           "result": "passed",
           "durationSeconds": 4,
-          "summary": "All 145 focused lifecycle tests passed, including the fixed main-owned provider deadline, failed-start and failed-launch recovery, Stop and deadline exact-tree oracles with unrelated canaries, POSIX exit, ESRCH, and permission-aware confirmation, actionable unconfirmed termination, and mocked Windows taskkill confirmation, inherited-handle failure, timeout, graceful Stop, safe force escalation, and exit-before-close stale-PID rejection with helper cancellation."
+          "summary": "All 146 focused lifecycle tests passed, including the fixed main-owned provider deadline, failed-start and failed-launch recovery, Stop and deadline exact-tree oracles with unrelated canaries, POSIX exit, ESRCH, and permission-aware confirmation, actionable unconfirmed termination, and mocked Windows taskkill confirmation, inherited-handle failure, timeout, graceful Stop, safe force escalation, and exit-before-close stale-PID refusal with helper cancellation."
         },
         {
           "date": "2026-08-14",
@@ -257,7 +258,7 @@
       },
       "redGreenEvidence": {
         "status": "complete",
-        "evidence": "The rollback oracle passes the pre-#14352 ordinary store, fails affected-main mixed bytes, passes candidate mixed bytes plus old-service destroy and re-upgrade, and fails again when the compatibility fix is reverted. Separately for STA-4406, the same never-exiting-provider oracle stays pending with cleanup_pending/running on latest main b849099045, settles cleanup_failed/failed on the candidate while terminating the exact provider tree and preserving an unrelated canary, fails again when the controller deadline arm is disabled, and passes again when restored."
+        "evidence": "The rollback oracle passes the pre-#14352 ordinary store, fails affected-main mixed bytes, passes candidate mixed bytes plus old-service destroy and re-upgrade, and fails again when the compatibility fix is reverted. Separately for STA-4406, the same never-exiting-provider oracle stays pending with cleanup_pending/running on latest main a663f1bd00, settles cleanup_failed/failed on the candidate while terminating the exact provider tree and preserving an unrelated canary, fails again when the controller deadline arm is disabled, and passes again when restored."
       },
       "performanceBudget": {
         "required": true,

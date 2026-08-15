@@ -320,6 +320,40 @@ describe('runRecipeCommand', () => {
     }
   })
 
+  it('does not start Windows Stop after its owned shell exits', async () => {
+    vi.useFakeTimers()
+    const restorePlatform = setProcessPlatform('win32')
+    const child = makeMockChild(990)
+    const spawnTreeKiller = vi.fn()
+    const stopController = new AbortController()
+    try {
+      const resultPromise = runRecipeCommand({
+        command: 'destroy',
+        repoPath: makeRepo(),
+        mode: 'destroy',
+        resultSchemaVersion: 1,
+        context: { recipeId: 'cloud-sandbox', repoPath: makeRepo() },
+        signal: stopController.signal,
+        spawnCommand: vi.fn(() => child) as never,
+        spawnTreeKiller: spawnTreeKiller as never
+      })
+
+      child.emit('exit', 0, null)
+      stopController.abort()
+
+      await expect(resultPromise).resolves.toMatchObject({
+        aborted: true,
+        terminationFailed: true
+      })
+      expect(spawnTreeKiller).not.toHaveBeenCalled()
+      expect(child.kill).not.toHaveBeenCalled()
+      expect(child.unref).toHaveBeenCalledOnce()
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      restorePlatform()
+    }
+  })
+
   it('reports an unconfirmed stopped process tree as actionable', () => {
     expect(
       getEphemeralVmRecipeDestroyFailure({
