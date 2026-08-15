@@ -118,7 +118,7 @@ export async function runRecipeCommand(args: {
       }
       aborted = true
       gracefulTreeKillerController?.abort()
-      if (hasRecipeProcessExited(child, processExited)) {
+      if (process.platform === 'win32' && hasRecipeProcessExited(child, processExited)) {
         finishUnconfirmedExitedProcess()
         return
       }
@@ -164,7 +164,7 @@ export async function runRecipeCommand(args: {
         return
       }
       aborted = true
-      if (hasRecipeProcessExited(child, processExited)) {
+      if (process.platform === 'win32' && hasRecipeProcessExited(child, processExited)) {
         finishUnconfirmedExitedProcess()
         return
       }

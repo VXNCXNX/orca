@@ -133,6 +133,7 @@
           "file": "src/shared/ephemeral-vm-recipe-process-termination.test.ts",
           "assertions": [
             "POSIX force settlement waits for process-group disappearance and reports an unconfirmed survivor",
+            "Stop and deadline signals terminate an owned POSIX group after its shell leader exits",
             "POSIX permission denial cannot masquerade as confirmed process-group exit",
             "initial POSIX ESRCH confirms group absence without signaling a stale direct PID",
             "Windows wrapper exit rejects stale-PID deadline takeover before taskkill can target an unrelated tree",

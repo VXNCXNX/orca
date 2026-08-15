@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -55,6 +56,47 @@ function runWindowsRecipe(
 }
 
 describe('terminateRecipeProcess', () => {
+  it.skipIf(process.platform === 'win32').each([
+    { name: 'Stop', signalKey: 'signal' as const },
+    { name: 'deadline', signalKey: 'forceAbortSignal' as const }
+  ])('terminates an owned POSIX group after leader exit on $name', async ({ signalKey }) => {
+    const controller = new AbortController()
+    let processGroupPid = 0
+    let groupAliveAtAbort = false
+    const spawnCommand = vi.fn((command: string, options: Parameters<typeof spawn>[1]) => {
+      const child = spawn(command, options)
+      processGroupPid = child.pid ?? 0
+      child.once('exit', () => {
+        setImmediate(() => {
+          groupAliveAtAbort = isProcessGroupAlive(processGroupPid)
+          controller.abort()
+        })
+      })
+      return child
+    })
+
+    try {
+      const result = await runRecipeCommand({
+        command: 'sleep 60 </dev/null & exit 0',
+        repoPath: process.cwd(),
+        mode: 'destroy',
+        resultSchemaVersion: 1,
+        context: { recipeId: 'cloud-sandbox', repoPath: process.cwd() },
+        [signalKey]: controller.signal,
+        spawnCommand: spawnCommand as never
+      })
+
+      expect(groupAliveAtAbort).toBe(true)
+      expect(result).toMatchObject({ aborted: true })
+      expect(result).not.toHaveProperty('terminationFailed')
+      expect(isProcessGroupAlive(processGroupPid)).toBe(false)
+    } finally {
+      if (isProcessGroupAlive(processGroupPid)) {
+        process.kill(-processGroupPid, 'SIGKILL')
+      }
+    }
+  })
+
   it('waits for a force-killed POSIX process group to disappear', async () => {
     vi.useFakeTimers()
     const child = makeChild(123)
@@ -192,3 +234,15 @@ describe('terminateRecipeProcess', () => {
     }
   })
 })
+
+function isProcessGroupAlive(pid: number): boolean {
+  if (!pid) {
+    return false
+  }
+  try {
+    process.kill(-pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
