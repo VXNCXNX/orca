@@ -4017,9 +4017,8 @@ export class OrcaRuntimeService {
 
   private scheduleOrchestrationLineageHydration(): void {
     const inFlight = this.orchestrationLineageHydrationInFlight
-    const hydration = inFlight
-      ? inFlight.then(() => this.hydrateInferredWorktreeLineage())
-      : this.hydrateInferredWorktreeLineage()
+    const retry = (): Promise<void> => this.hydrateInferredWorktreeLineage()
+    const hydration = inFlight ? inFlight.then(retry, retry) : retry()
     void hydration.catch((error) => {
       console.warn('[orchestration] readiness lineage hydration failed', { error })
     })
@@ -29776,6 +29775,9 @@ export class OrcaRuntimeService {
         createdAt: Date.now()
       })
       changedRepoIds.add(getRepoIdFromWorktreeId(worktree.id))
+    }
+    if (changedRepoIds.size > 0) {
+      this.invalidateResolvedWorktreeCache()
     }
     for (const repoId of changedRepoIds) {
       this.notifyWorktreesChanged(repoId)

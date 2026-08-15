@@ -43028,13 +43028,43 @@ describe('OrcaRuntimeService', () => {
       inspection.close()
     }
 
+    const runtimeInternals = runtime as unknown as {
+      listResolvedWorktrees: () => Promise<unknown[]>
+    }
+    const resolvedWorktrees = await runtimeInternals.listResolvedWorktrees()
+    let rejectScan: ((error: Error) => void) | undefined
+    const resolvedWorktreeSpy = vi
+      .spyOn(runtimeInternals, 'listResolvedWorktrees')
+      .mockImplementationOnce(
+        () =>
+          new Promise((_, reject) => {
+            rejectScan = reject
+          })
+      )
+      .mockResolvedValue(resolvedWorktrees)
+    const failingHydration = runtime.hydrateInferredWorktreeLineage()
+    await vi.waitFor(() => expect(rejectScan).toBeTypeOf('function'))
+
     runtime.getOrchestrationDb()
+    rejectScan?.(new Error('scan failed'))
+
+    await expect(failingHydration).rejects.toThrow('scan failed')
 
     await vi.waitFor(() => {
       expect(setWorktreeLineage).toHaveBeenCalledWith(
         childId,
         expect.objectContaining({ parentWorktreeId: parentId, taskId: task.id })
       )
+    })
+    resolvedWorktreeSpy.mockRestore()
+    const publishedWorktrees = (await runtime.getWorktreePs()).worktrees
+    expect(publishedWorktrees.find(({ worktreeId }) => worktreeId === parentId)).toMatchObject({
+      parentWorktreeId: null,
+      childWorktreeIds: [childId]
+    })
+    expect(publishedWorktrees.find(({ worktreeId }) => worktreeId === childId)).toMatchObject({
+      parentWorktreeId: parentId,
+      childWorktreeIds: []
     })
     expect(worktreesChanged).toHaveBeenCalledWith(TEST_REPO_ID)
     expect(runtime.syncWindowGraph(1, { tabs: [], leaves: [] }).agentOrchestrationReady).toBe(true)
