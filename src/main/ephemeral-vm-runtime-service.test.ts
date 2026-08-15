@@ -163,62 +163,106 @@ describe('ephemeral VM runtime service', () => {
     expect(readFileSync(join(repoPath, 'cleanup-count.txt'), 'utf8')).toBe('x')
   })
 
-  it('stops a hung destroy and starts a fresh retry', async () => {
-    const userDataPath = makeDir('orca-ephemeral-vm-service-user-data-')
-    const repoPath = makeDir('orca-ephemeral-vm-service-repo-')
-    const cleanupPath = join(repoPath, 'cleanup.js')
-    const countPath = join(repoPath, 'cleanup-count.txt')
-    writeFileSync(
-      cleanupPath,
-      `require('fs').appendFileSync(${JSON.stringify(countPath)}, 'x'); setInterval(() => {}, 1000)`
-    )
-    const recipe: OrcaVmRecipe = {
-      id: 'cloud-sandbox',
-      name: 'Cloud Sandbox',
-      create: 'unused',
-      destroy: nodeCommand(cleanupPath)
-    }
-    upsertEphemeralVmRuntime(userDataPath, {
-      id: 'runtime-1',
-      recipeId: recipe.id,
-      recipe,
-      status: 'running',
-      cleanupStatus: 'not_started',
-      createdAt: 1_000,
-      updatedAt: 1_000,
-      recipeResult: {
-        schemaVersion: 1,
-        connection: {
-          type: 'ssh',
-          projectRoot: '/workspace/repo',
-          target: { label: 'VM', host: 'host', port: 22, username: 'orca' }
-        }
+  it.skipIf(process.platform === 'win32')(
+    'stops the exact hung process tree and starts a fresh retry',
+    async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+      const userDataPath = makeDir('orca-ephemeral-vm-service-user-data-')
+      const repoPath = makeDir('orca-ephemeral-vm-service-repo-')
+      const cleanupPath = join(repoPath, 'cleanup.js')
+      const countPath = join(repoPath, 'cleanup-count.txt')
+      const providerPidPath = join(repoPath, 'stop-provider-pid.txt')
+      const descendantPidPath = join(repoPath, 'stop-descendant-pid.txt')
+      const descendantScript = [
+        `require('fs').writeFileSync(${JSON.stringify(descendantPidPath)}, String(process.pid))`,
+        "process.on('SIGTERM', () => {})",
+        'setInterval(() => {}, 1000)'
+      ].join(';')
+      writeFileSync(
+        cleanupPath,
+        [
+          "const { spawn } = require('child_process')",
+          `require('fs').appendFileSync(${JSON.stringify(countPath)}, 'x')`,
+          `require('fs').writeFileSync(${JSON.stringify(providerPidPath)}, String(process.pid))`,
+          `spawn(process.execPath, ['-e', ${JSON.stringify(descendantScript)}], { stdio: 'ignore' })`,
+          'setInterval(() => {}, 1000)'
+        ].join(';')
+      )
+      const canary = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+        stdio: 'ignore'
+      })
+      const recipe: OrcaVmRecipe = {
+        id: 'cloud-sandbox',
+        name: 'Cloud Sandbox',
+        create: 'unused',
+        destroy: nodeCommand(cleanupPath)
       }
-    })
-    const cleanupArgs = {
-      userDataPath,
-      repoPath,
-      recipe,
-      runtimeId: 'runtime-1'
-    }
+      upsertEphemeralVmRuntime(userDataPath, {
+        id: 'runtime-1',
+        recipeId: recipe.id,
+        recipe,
+        status: 'running',
+        cleanupStatus: 'not_started',
+        createdAt: 1_000,
+        updatedAt: 1_000,
+        recipeResult: {
+          schemaVersion: 1,
+          connection: {
+            type: 'ssh',
+            projectRoot: '/workspace/repo',
+            target: { label: 'VM', host: 'host', port: 22, username: 'orca' }
+          }
+        }
+      })
+      const cleanupArgs = {
+        userDataPath,
+        repoPath,
+        recipe,
+        runtimeId: 'runtime-1'
+      }
 
-    const cleanup = cleanupEphemeralVmRuntime(cleanupArgs)
-    await vi.waitFor(() => expect(readFileSync(countPath, 'utf8')).toBe('x'))
-    const stopping = stopEphemeralVmRuntimeCleanup({ userDataPath, runtimeId: 'runtime-1' })
-    expect(stopping).not.toBeNull()
-    await expect(stopping).resolves.toMatchObject({
-      ok: false,
-      runtime: { status: 'cleanup_failed', cleanupStatus: 'failed' },
-      error: 'Cleanup stopped by user.'
-    })
-    await expect(cleanup).resolves.toMatchObject({ ok: false })
-    writeFileSync(cleanupPath, `require('fs').appendFileSync(${JSON.stringify(countPath)}, 'x')`)
-    await expect(cleanupEphemeralVmRuntime(cleanupArgs)).resolves.toMatchObject({
-      ok: true,
-      runtime: { status: 'cleaned', cleanupStatus: 'succeeded' }
-    })
-    expect(readFileSync(countPath, 'utf8')).toBe('xx')
-  })
+      const cleanup = cleanupEphemeralVmRuntime(cleanupArgs)
+      try {
+        await vi.waitFor(() => {
+          expect(readFileSync(countPath, 'utf8')).toBe('x')
+          expect(existsSync(descendantPidPath)).toBe(true)
+        })
+        const stopping = stopEphemeralVmRuntimeCleanup({ userDataPath, runtimeId: 'runtime-1' })
+        expect(stopping).not.toBeNull()
+        let settled = false
+        void stopping!.then(() => {
+          settled = true
+        })
+        await Promise.resolve()
+        expect(settled).toBe(false)
+        await vi.advanceTimersByTimeAsync(5_000)
+        await expect(stopping).resolves.toMatchObject({
+          ok: false,
+          runtime: { status: 'cleanup_failed', cleanupStatus: 'failed' },
+          error: 'Cleanup stopped by user.'
+        })
+        await vi.waitFor(() => {
+          expect(isProcessAlive(Number(readFileSync(providerPidPath, 'utf8')))).toBe(false)
+          expect(isProcessAlive(Number(readFileSync(descendantPidPath, 'utf8')))).toBe(false)
+        })
+        expect(isProcessAlive(canary.pid!)).toBe(true)
+        writeFileSync(
+          cleanupPath,
+          `require('fs').appendFileSync(${JSON.stringify(countPath)}, 'x')`
+        )
+        await expect(cleanupEphemeralVmRuntime(cleanupArgs)).resolves.toMatchObject({
+          ok: true,
+          runtime: { status: 'cleaned', cleanupStatus: 'succeeded' }
+        })
+        expect(readFileSync(countPath, 'utf8')).toBe('xx')
+      } finally {
+        stopEphemeralVmRuntimeCleanup({ userDataPath, runtimeId: 'runtime-1' })
+        canary.kill('SIGKILL')
+        await cleanup
+      }
+    },
+    15_000
+  )
 
   it.skipIf(process.platform === 'win32')(
     'bounds a hung destroy to its exact process tree and retains retry state',

@@ -1,9 +1,13 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import type { EphemeralVmRecipeContext } from './ephemeral-vm-recipe-runner'
+import {
+  isRecipeProcessTreeAlive,
+  terminateRecipeProcess
+} from './ephemeral-vm-recipe-process-termination'
 
 const DEFAULT_MAX_CAPTURE_BYTES = 1024 * 1024
 const CANCEL_FORCE_KILL_DELAY_MS = 5_000
-export const RECIPE_PROCESS_TREE_TERMINATION_TIMEOUT_MS = 5_000
+const PROCESS_TREE_EXIT_CHECK_INTERVAL_MS = 50
 
 export type ProcessRunResult = {
   stdout: string
@@ -63,7 +67,10 @@ export async function runRecipeCommand(args: {
     let settled = false
     let aborted = false
     let forceAborting = false
+    let gracefulTerminationConfirmed = false
+    let closeResult: ProcessRunResult | undefined
     let forceKillTimer: ReturnType<typeof setTimeout> | undefined
+    let treeExitCheckTimer: ReturnType<typeof setTimeout> | undefined
     const finish = (result: ProcessRunResult): void => {
       if (settled) {
         return
@@ -71,6 +78,9 @@ export async function runRecipeCommand(args: {
       settled = true
       if (forceKillTimer) {
         clearTimeout(forceKillTimer)
+      }
+      if (treeExitCheckTimer) {
+        clearTimeout(treeExitCheckTimer)
       }
       args.signal?.removeEventListener('abort', abort)
       args.forceAbortSignal?.removeEventListener('abort', forceAbort)
@@ -84,6 +94,9 @@ export async function runRecipeCommand(args: {
       if (forceKillTimer) {
         clearTimeout(forceKillTimer)
       }
+      if (treeExitCheckTimer) {
+        clearTimeout(treeExitCheckTimer)
+      }
       args.signal?.removeEventListener('abort', abort)
       args.forceAbortSignal?.removeEventListener('abort', forceAbort)
       reject(error)
@@ -96,6 +109,9 @@ export async function runRecipeCommand(args: {
       aborted = true
       if (forceKillTimer) {
         clearTimeout(forceKillTimer)
+      }
+      if (treeExitCheckTimer) {
+        clearTimeout(treeExitCheckTimer)
       }
       void terminateRecipeProcess(child, true, args.spawnTreeKiller).then((confirmed) => {
         finish({
@@ -112,6 +128,23 @@ export async function runRecipeCommand(args: {
         child.unref()
       })
     }
+    const finishStoppedProcessTree = (): void => {
+      if (!closeResult || settled || forceAborting) {
+        return
+      }
+      if (gracefulTerminationConfirmed || !isRecipeProcessTreeAlive(child)) {
+        finish(closeResult)
+        return
+      }
+      if (process.platform === 'win32' || treeExitCheckTimer) {
+        return
+      }
+      treeExitCheckTimer = setTimeout(() => {
+        treeExitCheckTimer = undefined
+        finishStoppedProcessTree()
+      }, PROCESS_TREE_EXIT_CHECK_INTERVAL_MS)
+      treeExitCheckTimer.unref()
+    }
     const abort = (): void => {
       if (settled || forceAborting) {
         return
@@ -124,7 +157,10 @@ export async function runRecipeCommand(args: {
         forceAbort()
       }, CANCEL_FORCE_KILL_DELAY_MS)
       forceKillTimer.unref()
-      void terminateRecipeProcess(child, false, args.spawnTreeKiller)
+      void terminateRecipeProcess(child, false, args.spawnTreeKiller).then((confirmed) => {
+        gracefulTerminationConfirmed = confirmed
+        finishStoppedProcessTree()
+      })
     }
 
     child.stdout.setEncoding('utf8')
@@ -138,7 +174,7 @@ export async function runRecipeCommand(args: {
       args.onStderr?.(chunk)
     })
     child.on('error', (error) => {
-      if (forceAborting) {
+      if (aborted || forceAborting) {
         return
       }
       fail(error)
@@ -147,7 +183,19 @@ export async function runRecipeCommand(args: {
       if (forceAborting) {
         return
       }
-      finish({ stdout, stderr, exitCode, signal, ...(aborted ? { aborted: true } : {}) })
+      const result = {
+        stdout,
+        stderr,
+        exitCode,
+        signal,
+        ...(aborted ? { aborted: true as const } : {})
+      }
+      if (!aborted) {
+        finish(result)
+        return
+      }
+      closeResult = result
+      finishStoppedProcessTree()
     })
 
     if (args.forceAbortSignal?.aborted) {
@@ -169,73 +217,6 @@ export async function runRecipeCommand(args: {
     } else {
       child.stdin.end()
     }
-  })
-}
-
-function terminateRecipeProcess(
-  child: ChildProcessWithoutNullStreams,
-  force: boolean,
-  spawnTreeKiller = spawn
-): Promise<boolean> {
-  const signal = force ? 'SIGKILL' : 'SIGTERM'
-  if (process.platform === 'win32') {
-    if (child.pid) {
-      return terminateWindowsRecipeProcess(child, signal, force, spawnTreeKiller)
-    }
-    child.kill(signal)
-    return Promise.resolve(false)
-  }
-  if (child.pid) {
-    try {
-      // Recipes run through a shell; kill the process group so shell children do not linger.
-      process.kill(-child.pid, signal)
-      return Promise.resolve(true)
-    } catch {
-      // Fall back to killing the direct child if the process group is already gone.
-    }
-  }
-  child.kill(signal)
-  return Promise.resolve(false)
-}
-
-function terminateWindowsRecipeProcess(
-  child: ChildProcessWithoutNullStreams,
-  signal: NodeJS.Signals,
-  force: boolean,
-  spawnTreeKiller: typeof spawn
-): Promise<boolean> {
-  return new Promise((resolve) => {
-    let settled = false
-    let killer: ReturnType<typeof spawn>
-    const finish = (confirmed: boolean): void => {
-      if (settled) {
-        return
-      }
-      settled = true
-      clearTimeout(timeout)
-      if (!confirmed) {
-        child.kill(signal)
-      }
-      resolve(confirmed)
-    }
-    try {
-      killer = spawnTreeKiller(
-        'taskkill',
-        ['/pid', String(child.pid), '/t', ...(force ? ['/f'] : [])],
-        { windowsHide: true, stdio: 'ignore' }
-      )
-    } catch {
-      child.kill(signal)
-      resolve(false)
-      return
-    }
-    const timeout = setTimeout(() => {
-      killer.kill('SIGKILL')
-      finish(false)
-    }, RECIPE_PROCESS_TREE_TERMINATION_TIMEOUT_MS)
-    timeout.unref()
-    killer.once('error', () => finish(false))
-    killer.once('close', (exitCode) => finish(exitCode === 0))
   })
 }
 

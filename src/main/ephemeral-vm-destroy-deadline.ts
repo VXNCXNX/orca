@@ -1,4 +1,4 @@
-import { RECIPE_PROCESS_TREE_TERMINATION_TIMEOUT_MS } from '../shared/ephemeral-vm-recipe-process'
+import { RECIPE_PROCESS_TREE_TERMINATION_TIMEOUT_MS } from '../shared/ephemeral-vm-recipe-process-termination'
 
 export const EPHEMERAL_VM_DESTROY_DEADLINE_MS = 5 * 60 * 1000
 

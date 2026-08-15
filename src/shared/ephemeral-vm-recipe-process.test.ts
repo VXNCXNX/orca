@@ -4,6 +4,10 @@ import { PassThrough } from 'node:stream'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  EPHEMERAL_VM_CLEANUP_TERMINATION_UNCONFIRMED_ERROR,
+  getEphemeralVmRecipeDestroyFailure
+} from './ephemeral-vm-recipe-destroy-result'
 import { runRecipeCommand } from './ephemeral-vm-recipe-process'
 
 const tmpRoots: string[] = []
@@ -120,7 +124,7 @@ describe('runRecipeCommand', () => {
       kill: vi.fn(),
       unref: vi.fn()
     })
-    const killer = Object.assign(new EventEmitter(), { kill: vi.fn() })
+    const killer = Object.assign(new EventEmitter(), { kill: vi.fn(), unref: vi.fn() })
     const spawnTreeKiller = vi.fn(() => killer)
     const controller = new AbortController()
     try {
@@ -166,7 +170,7 @@ describe('runRecipeCommand', () => {
       kill: vi.fn(),
       unref: vi.fn()
     })
-    const killer = Object.assign(new EventEmitter(), { kill: vi.fn() })
+    const killer = Object.assign(new EventEmitter(), { kill: vi.fn(), unref: vi.fn() })
     const controller = new AbortController()
     try {
       const resultPromise = runRecipeCommand({
@@ -201,7 +205,7 @@ describe('runRecipeCommand', () => {
       kill: vi.fn(),
       unref: vi.fn()
     })
-    const killer = Object.assign(new EventEmitter(), { kill: vi.fn() })
+    const killer = Object.assign(new EventEmitter(), { kill: vi.fn(), unref: vi.fn() })
     const controller = new AbortController()
     try {
       const resultPromise = runRecipeCommand({
@@ -220,6 +224,9 @@ describe('runRecipeCommand', () => {
 
       await expect(resultPromise).resolves.toMatchObject({ terminationFailed: true })
       expect(killer.kill).toHaveBeenCalledWith('SIGKILL')
+      expect(killer.unref).toHaveBeenCalledOnce()
+      expect(killer.listenerCount('error')).toBe(0)
+      expect(killer.listenerCount('close')).toBe(0)
       expect(child.kill).toHaveBeenCalledWith('SIGKILL')
       expect(vi.getTimerCount()).toBe(0)
     } finally {
@@ -264,6 +271,66 @@ describe('runRecipeCommand', () => {
     } finally {
       restorePlatform()
     }
+  })
+
+  it('force-escalates a Windows Stop when the total deadline arrives', async () => {
+    vi.useFakeTimers()
+    const restorePlatform = setProcessPlatform('win32')
+    const child = Object.assign(new EventEmitter(), {
+      pid: 988,
+      stdin: new PassThrough(),
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      kill: vi.fn(),
+      unref: vi.fn()
+    })
+    const gracefulKiller = Object.assign(new EventEmitter(), { kill: vi.fn(), unref: vi.fn() })
+    const forceKiller = Object.assign(new EventEmitter(), { kill: vi.fn(), unref: vi.fn() })
+    const spawnTreeKiller = vi
+      .fn()
+      .mockReturnValueOnce(gracefulKiller)
+      .mockReturnValueOnce(forceKiller)
+    const stopController = new AbortController()
+    const deadlineController = new AbortController()
+    try {
+      const resultPromise = runRecipeCommand({
+        command: 'destroy',
+        repoPath: makeRepo(),
+        mode: 'destroy',
+        resultSchemaVersion: 1,
+        context: { recipeId: 'cloud-sandbox', repoPath: makeRepo() },
+        signal: stopController.signal,
+        forceAbortSignal: deadlineController.signal,
+        spawnCommand: vi.fn(() => child) as never,
+        spawnTreeKiller: spawnTreeKiller as never
+      })
+
+      stopController.abort()
+      gracefulKiller.emit('close', 1, null)
+      deadlineController.abort()
+
+      expect(spawnTreeKiller).toHaveBeenNthCalledWith(2, 'taskkill', ['/pid', '988', '/t', '/f'], {
+        windowsHide: true,
+        stdio: 'ignore'
+      })
+      forceKiller.emit('close', 0, null)
+      await expect(resultPromise).resolves.toMatchObject({ aborted: true })
+    } finally {
+      restorePlatform()
+    }
+  })
+
+  it('reports an unconfirmed stopped process tree as actionable', () => {
+    expect(
+      getEphemeralVmRecipeDestroyFailure({
+        stdout: '',
+        stderr: '',
+        exitCode: null,
+        signal: null,
+        aborted: true,
+        terminationFailed: true
+      })
+    ).toMatchObject({ error: EPHEMERAL_VM_CLEANUP_TERMINATION_UNCONFIRMED_ERROR })
   })
 
   it('clears the force-kill timer when graceful termination closes synchronously', async () => {

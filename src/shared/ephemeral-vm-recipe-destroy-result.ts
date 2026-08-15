@@ -1,6 +1,8 @@
 import type { ProcessRunResult } from './ephemeral-vm-recipe-process'
 
 export const EPHEMERAL_VM_CLEANUP_STOPPED_ERROR = 'Cleanup stopped by user.'
+export const EPHEMERAL_VM_CLEANUP_TERMINATION_UNCONFIRMED_ERROR =
+  'Cleanup stopped, but Orca could not confirm that the provider process tree stopped. Retry cleanup or copy the destroy command.'
 
 type FailedEphemeralVmRecipeDestroy = {
   ok: false
@@ -15,7 +17,9 @@ export function getEphemeralVmRecipeDestroyFailure(
     return {
       ok: false,
       skipped: false,
-      error: EPHEMERAL_VM_CLEANUP_STOPPED_ERROR,
+      error: result.terminationFailed
+        ? EPHEMERAL_VM_CLEANUP_TERMINATION_UNCONFIRMED_ERROR
+        : EPHEMERAL_VM_CLEANUP_STOPPED_ERROR,
       ...result
     }
   }

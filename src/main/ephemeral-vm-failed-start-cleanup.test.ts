@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { EPHEMERAL_VM_CLEANUP_TERMINATION_UNCONFIRMED_ERROR } from '../shared/ephemeral-vm-recipe-destroy-result'
 import { listEphemeralVmRuntimes } from '../shared/ephemeral-vm-runtime-store'
 import { EPHEMERAL_VM_DESTROY_DEADLINE_MS } from './ephemeral-vm-destroy-deadline'
 
@@ -85,6 +86,57 @@ it('bounds failed-start destroy and persists actionable recovery', async () => {
       status: 'cleanup_failed',
       cleanupStatus: 'failed',
       cleanupLastError: expect.stringContaining('5-minute deadline')
+    })
+  ])
+  expect(vi.getTimerCount()).toBe(0)
+})
+
+it('persists unconfirmed stopped-tree recovery after a failed start', async () => {
+  runCleanupMock.mockResolvedValue({
+    ok: false,
+    skipped: false,
+    error: EPHEMERAL_VM_CLEANUP_TERMINATION_UNCONFIRMED_ERROR,
+    stdout: '',
+    stderr: '',
+    exitCode: null,
+    signal: null,
+    aborted: true,
+    terminationFailed: true
+  })
+
+  await cleanupFailedEphemeralVmStart(
+    {
+      userDataPath: tempDir,
+      repoPath: tempDir,
+      recipe: {
+        id: 'cloud-sandbox',
+        name: 'Cloud Sandbox',
+        create: 'unused',
+        destroy: 'failed-tree-kill'
+      },
+      now: 2_000
+    },
+    {
+      context: {
+        instanceId: 'runtime-unconfirmed-stop',
+        recipeId: 'cloud-sandbox',
+        repoPath: tempDir
+      },
+      recipeResult: {
+        schemaVersion: 1,
+        connection: {
+          type: 'ssh',
+          projectRoot: '/workspace/repo',
+          target: { label: 'VM', host: 'host', port: 22, username: 'orca' }
+        }
+      }
+    }
+  )
+
+  expect(listEphemeralVmRuntimes(tempDir)).toEqual([
+    expect.objectContaining({
+      id: 'runtime-unconfirmed-stop',
+      cleanupLastError: EPHEMERAL_VM_CLEANUP_TERMINATION_UNCONFIRMED_ERROR
     })
   ])
   expect(vi.getTimerCount()).toBe(0)
