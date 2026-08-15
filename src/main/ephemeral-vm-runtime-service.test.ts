@@ -20,10 +20,12 @@ import {
   stopEphemeralVmRuntimeCleanup
 } from './ephemeral-vm-runtime-service'
 import type { OrcaVmRecipe } from '../shared/orca-yaml-hook-types'
+import { EPHEMERAL_VM_DESTROY_DEADLINE_MS } from './ephemeral-vm-destroy-deadline'
 
 const tempDirs: string[] = []
 
 afterEach(() => {
+  vi.useRealTimers()
   for (const root of tempDirs.splice(0)) {
     rmSync(root, { recursive: true, force: true })
   }
@@ -221,6 +223,7 @@ describe('ephemeral VM runtime service', () => {
   it.skipIf(process.platform === 'win32')(
     'bounds a hung destroy to its exact process tree and retains retry state',
     async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true })
       const userDataPath = makeDir('orca-ephemeral-vm-service-user-data-')
       const repoPath = makeDir('orca-ephemeral-vm-service-repo-')
       const cleanupPath = join(repoPath, 'cleanup.js')
@@ -271,8 +274,7 @@ describe('ephemeral VM runtime service', () => {
         userDataPath,
         repoPath,
         recipe,
-        runtimeId: 'runtime-deadline',
-        cleanupDeadlineMs: 1_000
+        runtimeId: 'runtime-deadline'
       }
       const cleanup = cleanupEphemeralVmRuntime(cleanupArgs)
 
@@ -281,16 +283,14 @@ describe('ephemeral VM runtime service', () => {
           expect(existsSync(providerPidPath)).toBe(true)
           expect(existsSync(descendantPidPath)).toBe(true)
         })
-        const settlement = await Promise.race([
-          cleanup.then(() => 'settled' as const),
-          new Promise<'pending'>((resolve) => setTimeout(() => resolve('pending'), 2_500))
-        ])
+        await vi.advanceTimersByTimeAsync(EPHEMERAL_VM_DESTROY_DEADLINE_MS)
+        await cleanup
 
         const runtimeAtSettlement = listEphemeralVmRuntimes(userDataPath).find(
           (runtime) => runtime.id === 'runtime-deadline'
         )
         expect({
-          settlement,
+          settlement: 'settled',
           status: runtimeAtSettlement?.status,
           cleanupStatus: runtimeAtSettlement?.cleanupStatus
         }).toEqual({

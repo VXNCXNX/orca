@@ -77,12 +77,13 @@ export type EphemeralVmRecipeCleanupArgs = {
   env?: NodeJS.ProcessEnv
   maxCaptureBytes?: number
   signal?: AbortSignal
+  forceAbortSignal?: AbortSignal
   onStdout?: (chunk: string) => void
   onStderr?: (chunk: string) => void
   spawnCommand?: typeof spawn
 }
 
-export type EphemeralVmRecipeLifecycleArgs = EphemeralVmRecipeCleanupArgs
+export type EphemeralVmRecipeLifecycleArgs = Omit<EphemeralVmRecipeCleanupArgs, 'forceAbortSignal'>
 
 export type EphemeralVmRecipeCleanupResult = {
   ok: boolean
@@ -92,6 +93,8 @@ export type EphemeralVmRecipeCleanupResult = {
   stderr: string
   exitCode: number | null
   signal: NodeJS.Signals | null
+  aborted?: true
+  terminationFailed?: true
 }
 
 export type EphemeralVmRecipeResumeResult =
@@ -181,6 +184,7 @@ export async function runEphemeralVmRecipeCleanup(
     env: args.env,
     maxCaptureBytes: args.maxCaptureBytes,
     signal: args.signal,
+    forceAbortSignal: args.forceAbortSignal,
     onStdout: args.onStdout,
     onStderr: args.onStderr,
     spawnCommand: args.spawnCommand

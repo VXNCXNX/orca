@@ -12,6 +12,11 @@ import {
   runEphemeralVmRecipeCleanup,
   type EphemeralVmRecipeContext
 } from './ephemeral-vm-recipe-runner'
+import {
+  armEphemeralVmDestroyDeadline,
+  getEphemeralVmDestroyDeadlineError,
+  getEphemeralVmDestroyDeadlineMs
+} from './ephemeral-vm-destroy-deadline'
 
 type FailedStart = {
   context: EphemeralVmRecipeContext
@@ -63,6 +68,8 @@ async function getCleanupError(
   args: ProvisionEphemeralVmRuntimeArgs,
   start: FailedStart
 ): Promise<string | null> {
+  const deadlineController = new AbortController()
+  const disarmDeadline = armEphemeralVmDestroyDeadline(deadlineController)
   try {
     const cleanup = await runEphemeralVmRecipeCleanup({
       repoPath: args.repoPath,
@@ -70,9 +77,14 @@ async function getCleanupError(
       context: start.context,
       recipeResult: start.recipeResult,
       signal: args.signal,
+      forceAbortSignal: deadlineController.signal,
       onStdout: args.onStdout,
       onStderr: args.onStderr
     })
+    const deadlineMs = getEphemeralVmDestroyDeadlineMs(deadlineController.signal)
+    if (deadlineMs !== null) {
+      return getEphemeralVmDestroyDeadlineError(deadlineMs, cleanup.terminationFailed)
+    }
     if (cleanup.ok && !cleanup.skipped) {
       return null
     }
@@ -81,5 +93,7 @@ async function getCleanupError(
       : (cleanup.error ?? 'Destroy failed.')
   } catch (error) {
     return error instanceof Error ? error.message : String(error)
+  } finally {
+    disarmDeadline()
   }
 }

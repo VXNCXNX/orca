@@ -97,16 +97,173 @@ describe('runRecipeCommand', () => {
       mode: 'destroy',
       resultSchemaVersion: 1,
       context: { recipeId: 'cloud-sandbox', repoPath: makeRepo() },
-      signal: controller.signal,
+      forceAbortSignal: controller.signal,
       spawnCommand: vi.fn(() => child) as never
     })
 
-    controller.abort({ name: 'TimeoutError' })
+    controller.abort()
 
     await expect(resultPromise).resolves.toMatchObject({ aborted: true, exitCode: null })
     expect(child.kill).toHaveBeenCalledWith('SIGKILL')
     expect(child.unref).toHaveBeenCalledOnce()
     expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('waits for Windows taskkill before deadline settlement', async () => {
+    vi.useFakeTimers()
+    const restorePlatform = setProcessPlatform('win32')
+    const child = Object.assign(new EventEmitter(), {
+      pid: 321,
+      stdin: new PassThrough(),
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      kill: vi.fn(),
+      unref: vi.fn()
+    })
+    const killer = Object.assign(new EventEmitter(), { kill: vi.fn() })
+    const spawnTreeKiller = vi.fn(() => killer)
+    const controller = new AbortController()
+    try {
+      const resultPromise = runRecipeCommand({
+        command: 'destroy',
+        repoPath: makeRepo(),
+        mode: 'destroy',
+        resultSchemaVersion: 1,
+        context: { recipeId: 'cloud-sandbox', repoPath: makeRepo() },
+        forceAbortSignal: controller.signal,
+        spawnCommand: vi.fn(() => child) as never,
+        spawnTreeKiller: spawnTreeKiller as never
+      })
+
+      controller.abort()
+      let settled = false
+      void resultPromise.then(() => {
+        settled = true
+      })
+      await Promise.resolve()
+
+      expect(settled).toBe(false)
+      expect(spawnTreeKiller).toHaveBeenCalledWith('taskkill', ['/pid', '321', '/t', '/f'], {
+        windowsHide: true,
+        stdio: 'ignore'
+      })
+      killer.emit('close', 0, null)
+      await expect(resultPromise).resolves.not.toHaveProperty('terminationFailed')
+      expect(child.unref).toHaveBeenCalledOnce()
+    } finally {
+      restorePlatform()
+    }
+  })
+
+  it('reports an unconfirmed Windows tree kill and falls back to the wrapper', async () => {
+    vi.useFakeTimers()
+    const restorePlatform = setProcessPlatform('win32')
+    const child = Object.assign(new EventEmitter(), {
+      pid: 654,
+      stdin: new PassThrough(),
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      kill: vi.fn(),
+      unref: vi.fn()
+    })
+    const killer = Object.assign(new EventEmitter(), { kill: vi.fn() })
+    const controller = new AbortController()
+    try {
+      const resultPromise = runRecipeCommand({
+        command: 'destroy',
+        repoPath: makeRepo(),
+        mode: 'destroy',
+        resultSchemaVersion: 1,
+        context: { recipeId: 'cloud-sandbox', repoPath: makeRepo() },
+        forceAbortSignal: controller.signal,
+        spawnCommand: vi.fn(() => child) as never,
+        spawnTreeKiller: vi.fn(() => killer) as never
+      })
+
+      controller.abort()
+      killer.emit('close', 1, null)
+
+      await expect(resultPromise).resolves.toMatchObject({ terminationFailed: true })
+      expect(child.kill).toHaveBeenCalledWith('SIGKILL')
+    } finally {
+      restorePlatform()
+    }
+  })
+
+  it('bounds an unresponsive Windows tree killer', async () => {
+    vi.useFakeTimers()
+    const restorePlatform = setProcessPlatform('win32')
+    const child = Object.assign(new EventEmitter(), {
+      pid: 765,
+      stdin: new PassThrough(),
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      kill: vi.fn(),
+      unref: vi.fn()
+    })
+    const killer = Object.assign(new EventEmitter(), { kill: vi.fn() })
+    const controller = new AbortController()
+    try {
+      const resultPromise = runRecipeCommand({
+        command: 'destroy',
+        repoPath: makeRepo(),
+        mode: 'destroy',
+        resultSchemaVersion: 1,
+        context: { recipeId: 'cloud-sandbox', repoPath: makeRepo() },
+        forceAbortSignal: controller.signal,
+        spawnCommand: vi.fn(() => child) as never,
+        spawnTreeKiller: vi.fn(() => killer) as never
+      })
+
+      controller.abort()
+      await vi.advanceTimersByTimeAsync(5_000)
+
+      await expect(resultPromise).resolves.toMatchObject({ terminationFailed: true })
+      expect(killer.kill).toHaveBeenCalledWith('SIGKILL')
+      expect(child.kill).toHaveBeenCalledWith('SIGKILL')
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      restorePlatform()
+    }
+  })
+
+  it('omits Windows force mode for explicit Stop', async () => {
+    vi.useFakeTimers()
+    const restorePlatform = setProcessPlatform('win32')
+    const child = Object.assign(new EventEmitter(), {
+      pid: 987,
+      stdin: new PassThrough(),
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      kill: vi.fn(),
+      unref: vi.fn()
+    })
+    const killer = Object.assign(new EventEmitter(), { kill: vi.fn() })
+    const spawnTreeKiller = vi.fn(() => killer)
+    const controller = new AbortController()
+    try {
+      const resultPromise = runRecipeCommand({
+        command: 'destroy',
+        repoPath: makeRepo(),
+        mode: 'destroy',
+        resultSchemaVersion: 1,
+        context: { recipeId: 'cloud-sandbox', repoPath: makeRepo() },
+        signal: controller.signal,
+        spawnCommand: vi.fn(() => child) as never,
+        spawnTreeKiller: spawnTreeKiller as never
+      })
+
+      controller.abort()
+      expect(spawnTreeKiller).toHaveBeenCalledWith('taskkill', ['/pid', '987', '/t'], {
+        windowsHide: true,
+        stdio: 'ignore'
+      })
+      killer.emit('close', 0, null)
+      child.emit('close', null, 'SIGTERM')
+      await expect(resultPromise).resolves.toMatchObject({ aborted: true, signal: 'SIGTERM' })
+    } finally {
+      restorePlatform()
+    }
   })
 
   it('clears the force-kill timer when graceful termination closes synchronously', async () => {
@@ -210,3 +367,13 @@ describe('runRecipeCommand', () => {
     }
   )
 })
+
+function setProcessPlatform(platform: NodeJS.Platform): () => void {
+  const original = Object.getOwnPropertyDescriptor(process, 'platform')
+  Object.defineProperty(process, 'platform', { configurable: true, value: platform })
+  return () => {
+    if (original) {
+      Object.defineProperty(process, 'platform', original)
+    }
+  }
+}

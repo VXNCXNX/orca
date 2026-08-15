@@ -3,6 +3,7 @@ import type { EphemeralVmRecipeContext } from './ephemeral-vm-recipe-runner'
 
 const DEFAULT_MAX_CAPTURE_BYTES = 1024 * 1024
 const CANCEL_FORCE_KILL_DELAY_MS = 5_000
+export const RECIPE_PROCESS_TREE_TERMINATION_TIMEOUT_MS = 5_000
 
 export type ProcessRunResult = {
   stdout: string
@@ -10,6 +11,7 @@ export type ProcessRunResult = {
   exitCode: number | null
   signal: NodeJS.Signals | null
   aborted?: true
+  terminationFailed?: true
 }
 
 export function quoteShellToken(value: string): string {
@@ -32,9 +34,11 @@ export async function runRecipeCommand(args: {
   env?: NodeJS.ProcessEnv
   maxCaptureBytes?: number
   signal?: AbortSignal
+  forceAbortSignal?: AbortSignal
   onStdout?: (chunk: string) => void
   onStderr?: (chunk: string) => void
   spawnCommand?: typeof spawn
+  spawnTreeKiller?: typeof spawn
 }): Promise<ProcessRunResult> {
   const maxBytes = args.maxCaptureBytes ?? DEFAULT_MAX_CAPTURE_BYTES
   const spawnCommand = args.spawnCommand ?? spawn
@@ -58,6 +62,7 @@ export async function runRecipeCommand(args: {
     let stderr = ''
     let settled = false
     let aborted = false
+    let forceAborting = false
     let forceKillTimer: ReturnType<typeof setTimeout> | undefined
     const finish = (result: ProcessRunResult): void => {
       if (settled) {
@@ -68,6 +73,7 @@ export async function runRecipeCommand(args: {
         clearTimeout(forceKillTimer)
       }
       args.signal?.removeEventListener('abort', abort)
+      args.forceAbortSignal?.removeEventListener('abort', forceAbort)
       resolve(result)
     }
     const fail = (error: Error): void => {
@@ -79,25 +85,38 @@ export async function runRecipeCommand(args: {
         clearTimeout(forceKillTimer)
       }
       args.signal?.removeEventListener('abort', abort)
+      args.forceAbortSignal?.removeEventListener('abort', forceAbort)
       reject(error)
     }
     const forceAbort = (): void => {
-      killRecipeProcess(child, true)
-      finish({ stdout, stderr, exitCode: null, signal: null, aborted: true })
-      child.stdin.destroy()
-      child.stdout.destroy()
-      child.stderr.destroy()
-      child.unref()
+      if (settled || forceAborting) {
+        return
+      }
+      forceAborting = true
+      aborted = true
+      if (forceKillTimer) {
+        clearTimeout(forceKillTimer)
+      }
+      void terminateRecipeProcess(child, true, args.spawnTreeKiller).then((confirmed) => {
+        finish({
+          stdout,
+          stderr,
+          exitCode: null,
+          signal: null,
+          aborted: true,
+          ...(!confirmed ? { terminationFailed: true as const } : {})
+        })
+        child.stdin.destroy()
+        child.stdout.destroy()
+        child.stderr.destroy()
+        child.unref()
+      })
     }
     const abort = (): void => {
-      if (settled) {
+      if (settled || forceAborting) {
         return
       }
       aborted = true
-      if (args.mode === 'destroy' && isTimeoutAbort(args.signal)) {
-        forceAbort()
-        return
-      }
       forceKillTimer = setTimeout(() => {
         if (settled) {
           return
@@ -105,7 +124,7 @@ export async function runRecipeCommand(args: {
         forceAbort()
       }, CANCEL_FORCE_KILL_DELAY_MS)
       forceKillTimer.unref()
-      killRecipeProcess(child)
+      void terminateRecipeProcess(child, false, args.spawnTreeKiller)
     }
 
     child.stdout.setEncoding('utf8')
@@ -119,18 +138,32 @@ export async function runRecipeCommand(args: {
       args.onStderr?.(chunk)
     })
     child.on('error', (error) => {
+      if (forceAborting) {
+        return
+      }
       fail(error)
     })
     child.on('close', (exitCode, signal) => {
+      if (forceAborting) {
+        return
+      }
       finish({ stdout, stderr, exitCode, signal, ...(aborted ? { aborted: true } : {}) })
     })
 
-    if (args.signal?.aborted) {
-      abort()
+    if (args.forceAbortSignal?.aborted) {
+      forceAbort()
     } else {
+      args.forceAbortSignal?.addEventListener('abort', forceAbort, { once: true })
+    }
+    if (!forceAborting && args.signal?.aborted) {
+      abort()
+    } else if (!forceAborting) {
       args.signal?.addEventListener('abort', abort, { once: true })
     }
 
+    if (forceAborting) {
+      return
+    }
     if (args.stdin) {
       child.stdin.end(args.stdin)
     } else {
@@ -139,43 +172,71 @@ export async function runRecipeCommand(args: {
   })
 }
 
-function isTimeoutAbort(signal: AbortSignal | undefined): boolean {
-  const reason: unknown = signal?.reason
-  return (
-    typeof reason === 'object' &&
-    reason !== null &&
-    'name' in reason &&
-    reason.name === 'TimeoutError'
-  )
-}
-
-function killRecipeProcess(child: ChildProcessWithoutNullStreams, force = false): void {
+function terminateRecipeProcess(
+  child: ChildProcessWithoutNullStreams,
+  force: boolean,
+  spawnTreeKiller = spawn
+): Promise<boolean> {
   const signal = force ? 'SIGKILL' : 'SIGTERM'
   if (process.platform === 'win32') {
-    // Recipes run through `cmd.exe /c` (shell: true), so child.kill() would only
-    // terminate the wrapper and orphan the actual recipe subprocess (e.g. a cloud
-    // CLI mid-provision). taskkill /T walks and kills the whole tree.
     if (child.pid) {
-      const killer = spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], {
-        windowsHide: true,
-        stdio: 'ignore'
-      })
-      killer.on('error', () => child.kill(signal))
-      return
+      return terminateWindowsRecipeProcess(child, signal, force, spawnTreeKiller)
     }
     child.kill(signal)
-    return
+    return Promise.resolve(false)
   }
   if (child.pid) {
     try {
       // Recipes run through a shell; kill the process group so shell children do not linger.
       process.kill(-child.pid, signal)
-      return
+      return Promise.resolve(true)
     } catch {
       // Fall back to killing the direct child if the process group is already gone.
     }
   }
   child.kill(signal)
+  return Promise.resolve(false)
+}
+
+function terminateWindowsRecipeProcess(
+  child: ChildProcessWithoutNullStreams,
+  signal: NodeJS.Signals,
+  force: boolean,
+  spawnTreeKiller: typeof spawn
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false
+    let killer: ReturnType<typeof spawn>
+    const finish = (confirmed: boolean): void => {
+      if (settled) {
+        return
+      }
+      settled = true
+      clearTimeout(timeout)
+      if (!confirmed) {
+        child.kill(signal)
+      }
+      resolve(confirmed)
+    }
+    try {
+      killer = spawnTreeKiller(
+        'taskkill',
+        ['/pid', String(child.pid), '/t', ...(force ? ['/f'] : [])],
+        { windowsHide: true, stdio: 'ignore' }
+      )
+    } catch {
+      child.kill(signal)
+      resolve(false)
+      return
+    }
+    const timeout = setTimeout(() => {
+      killer.kill('SIGKILL')
+      finish(false)
+    }, RECIPE_PROCESS_TREE_TERMINATION_TIMEOUT_MS)
+    timeout.unref()
+    killer.once('error', () => finish(false))
+    killer.once('close', (exitCode) => finish(exitCode === 0))
+  })
 }
 
 function buildRecipeEnv(
