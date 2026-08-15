@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync, truncateSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -216,6 +217,109 @@ describe('ephemeral VM runtime service', () => {
     })
     expect(readFileSync(countPath, 'utf8')).toBe('xx')
   })
+
+  it.skipIf(process.platform === 'win32')(
+    'bounds a hung destroy to its exact process tree and retains retry state',
+    async () => {
+      const userDataPath = makeDir('orca-ephemeral-vm-service-user-data-')
+      const repoPath = makeDir('orca-ephemeral-vm-service-repo-')
+      const cleanupPath = join(repoPath, 'cleanup.js')
+      const providerPidPath = join(repoPath, 'provider-pid.txt')
+      const descendantPidPath = join(repoPath, 'descendant-pid.txt')
+      const descendantScript = [
+        `require('fs').writeFileSync(${JSON.stringify(descendantPidPath)}, String(process.pid))`,
+        "process.on('SIGTERM', () => {})",
+        'setInterval(() => {}, 1000)'
+      ].join(';')
+      writeFileSync(
+        cleanupPath,
+        [
+          "const { spawn } = require('child_process')",
+          `require('fs').writeFileSync(${JSON.stringify(providerPidPath)}, String(process.pid))`,
+          `spawn(process.execPath, ['-e', ${JSON.stringify(descendantScript)}], { stdio: 'ignore' })`,
+          "process.on('SIGTERM', () => {})",
+          'setInterval(() => {}, 1000)'
+        ].join(';')
+      )
+      const canary = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+        stdio: 'ignore'
+      })
+      const recipe: OrcaVmRecipe = {
+        id: 'cloud-sandbox',
+        name: 'Cloud Sandbox',
+        create: 'unused',
+        destroy: nodeCommand(cleanupPath)
+      }
+      upsertEphemeralVmRuntime(userDataPath, {
+        id: 'runtime-deadline',
+        recipeId: recipe.id,
+        recipe,
+        status: 'running',
+        cleanupStatus: 'not_started',
+        createdAt: 1_000,
+        updatedAt: 1_000,
+        recipeResult: {
+          schemaVersion: 1,
+          connection: {
+            type: 'ssh',
+            projectRoot: '/workspace/repo',
+            target: { label: 'VM', host: 'host', port: 22, username: 'orca' }
+          }
+        }
+      })
+      const cleanupArgs = {
+        userDataPath,
+        repoPath,
+        recipe,
+        runtimeId: 'runtime-deadline',
+        cleanupDeadlineMs: 100
+      }
+      const cleanup = cleanupEphemeralVmRuntime(cleanupArgs)
+
+      try {
+        await vi.waitFor(() => {
+          expect(existsSync(providerPidPath)).toBe(true)
+          expect(existsSync(descendantPidPath)).toBe(true)
+        })
+        const settlement = await Promise.race([
+          cleanup.then(() => 'settled' as const),
+          new Promise<'pending'>((resolve) => setTimeout(() => resolve('pending'), 6_500))
+        ])
+
+        const runtimeAtSettlement = listEphemeralVmRuntimes(userDataPath).find(
+          (runtime) => runtime.id === 'runtime-deadline'
+        )
+        expect({
+          settlement,
+          status: runtimeAtSettlement?.status,
+          cleanupStatus: runtimeAtSettlement?.cleanupStatus
+        }).toEqual({
+          settlement: 'settled',
+          status: 'cleanup_failed',
+          cleanupStatus: 'failed'
+        })
+        await expect(cleanup).resolves.toMatchObject({
+          ok: false,
+          runtime: {
+            status: 'cleanup_failed',
+            cleanupStatus: 'failed',
+            cleanupLastError: expect.stringContaining('deadline')
+          },
+          error: expect.stringContaining('deadline')
+        })
+        await vi.waitFor(() => {
+          expect(isProcessAlive(Number(readFileSync(providerPidPath, 'utf8')))).toBe(false)
+          expect(isProcessAlive(Number(readFileSync(descendantPidPath, 'utf8')))).toBe(false)
+        })
+        expect(isProcessAlive(canary.pid!)).toBe(true)
+      } finally {
+        stopEphemeralVmRuntimeCleanup({ userDataPath, runtimeId: 'runtime-deadline' })
+        canary.kill('SIGKILL')
+        await cleanup
+      }
+    },
+    15_000
+  )
 
   it('does not persist a runtime when recipe output cannot be parsed', async () => {
     const userDataPath = makeDir('orca-ephemeral-vm-service-user-data-')
@@ -640,3 +744,12 @@ describe('ephemeral VM runtime service', () => {
     })
   })
 })
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
