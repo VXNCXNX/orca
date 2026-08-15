@@ -55,6 +55,7 @@ import {
 import { ORCHESTRATION_RUN_PAGE_LIMIT } from '../../../shared/orchestration-run-pagination'
 import {
   ORCHESTRATION_CONTRACT_VERSION,
+  ORCHESTRATION_LEGACY_CONTRACT_VERSION,
   ORCHESTRATION_FEDERATION_LIFECYCLE_SETTLEMENT_PROTOCOL_VERSION
 } from '../../../shared/protocol-version'
 import {
@@ -291,7 +292,7 @@ function legacyMessageMatchesQuestion(
 
 export const LEGACY_RUN_ID = ORCHESTRATION_LEGACY_RUN_ID
 
-export const LEGACY_CONTRACT_VERSION = 0
+export const LEGACY_CONTRACT_VERSION = ORCHESTRATION_LEGACY_CONTRACT_VERSION
 export const CURRENT_CONTRACT_VERSION = ORCHESTRATION_CONTRACT_VERSION
 
 export type RunListPage = {

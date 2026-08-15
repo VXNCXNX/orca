@@ -4,7 +4,12 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import SyncDatabase from '../../sqlite/sync-database'
 import { OrcaRuntimeService } from '../orca-runtime'
-import { CURRENT_CONTRACT_VERSION, OrchestrationDb } from './db'
+import {
+  CURRENT_CONTRACT_VERSION,
+  LEGACY_CONTRACT_VERSION,
+  LEGACY_RUN_ID,
+  OrchestrationDb
+} from './db'
 import { readLegacyWorkerTerminalRecoveryRows } from './orchestration-legacy-worker-recovery-reader'
 
 const MAILBOX_INDEXES = [
@@ -36,6 +41,22 @@ describe('legacy worker recovery reader', () => {
         "SELECT 1 AS found FROM sqlite_master WHERE type = 'index' AND name = ?"
       )
       return MAILBOX_INDEXES.filter((name) => statement.get(name)).length
+    } finally {
+      db.close()
+    }
+  }
+
+  function snapshotSchema(dbPath: string): { schema: unknown[]; userVersion: number } {
+    const db = new SyncDatabase(dbPath, { readonly: true, fileMustExist: true })
+    try {
+      return {
+        schema: db
+          .prepare(
+            'SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name, tbl_name'
+          )
+          .all(),
+        userVersion: db.pragma('user_version', { simple: true }) as number
+      }
     } finally {
       db.close()
     }
@@ -122,6 +143,52 @@ describe('legacy worker recovery reader', () => {
     expect(readLegacyWorkerTerminalRecoveryRows(dbPath)).toEqual([])
   })
 
+  it('classifies v18 recovery rows without changing the database', () => {
+    const dbPath = tempDatabasePath()
+    const db = new SyncDatabase(dbPath)
+    db.exec(`
+      CREATE TABLE dispatch_contexts (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        run_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        capability_hash TEXT,
+        assignee_handle TEXT,
+        assignee_pane_key TEXT,
+        process_incarnation TEXT
+      );
+      CREATE TABLE worker_dispatches (
+        dispatch_id TEXT PRIMARY KEY,
+        state TEXT NOT NULL,
+        worktree_id TEXT,
+        agent_terminal_handle TEXT
+      );
+      INSERT INTO dispatch_contexts VALUES
+        ('dispatch_legacy', 'task_legacy', '${LEGACY_RUN_ID}', 'dispatched', NULL,
+         'term_legacy', 'tab:legacy', 'pty:legacy'),
+        ('dispatch_current', 'task_current', '${LEGACY_RUN_ID}', 'dispatched', 'capability',
+         'term_current', 'tab:current', 'pty:current');
+      INSERT INTO worker_dispatches VALUES
+        ('dispatch_legacy', 'ready', 'repo::legacy', 'term_legacy'),
+        ('dispatch_current', 'ready', 'repo::current', 'term_current');
+      PRAGMA user_version = 18;
+    `)
+    db.close()
+    const before = snapshotSchema(dbPath)
+
+    expect(readLegacyWorkerTerminalRecoveryRows(dbPath)).toEqual([
+      expect.objectContaining({
+        dispatch_id: 'dispatch_legacy',
+        contract_version: LEGACY_CONTRACT_VERSION
+      }),
+      expect.objectContaining({
+        dispatch_id: 'dispatch_current',
+        contract_version: CURRENT_CONTRACT_VERSION
+      })
+    ])
+    expect(snapshotSchema(dbPath)).toEqual(before)
+  })
+
   it('keeps startup recovery outside the full schema readiness gate', () => {
     const { dbPath, dispatchId } = createRecoveryFixture()
     const runtime = new OrcaRuntimeService(null, undefined, {
@@ -131,6 +198,9 @@ describe('legacy worker recovery reader', () => {
     expect(runtime.prepareLegacyWorkerTerminalRecovery().candidates).toEqual([
       expect.objectContaining({ dispatchId })
     ])
+    expect(countMailboxIndexes(dbPath)).toBe(0)
+
+    runtime.syncWindowGraph(1, { tabs: [], leaves: [] })
     expect(countMailboxIndexes(dbPath)).toBe(0)
 
     const db = runtime.getOrchestrationDb()

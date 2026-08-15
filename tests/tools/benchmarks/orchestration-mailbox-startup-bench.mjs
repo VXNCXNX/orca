@@ -6,7 +6,7 @@
  * Usage:
  *   pnpm bench:orchestration-mailbox-startup --expect eager --rows 250000
  */
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import {
   copyFileSync,
   cpSync,
@@ -151,18 +151,42 @@ function parseStartupLine(line) {
     return null
   }
   const time = /(?:^|\s)t=(\d+(?:\.\d+)?)(?:\s|$)/.exec(match[2])
-  return { event: match[1], time: time ? Number(time[1]) : null }
+  const maxGap = /(?:^|\s)maxGapMs=(\d+(?:\.\d+)?)(?:\s|$)/.exec(match[2])
+  return {
+    event: match[1],
+    time: time ? Number(time[1]) : null,
+    maxGapMs: maxGap ? Number(maxGap[1]) : null
+  }
 }
 
-function killProcessTree(child) {
+function terminateProcessTree(child) {
   if (child.exitCode !== null || child.signalCode !== null) {
-    return
+    return Promise.resolve()
   }
-  if (process.platform === 'win32') {
-    spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' })
-    return
-  }
-  child.kill('SIGKILL')
+  return new Promise((resolvePromise, reject) => {
+    const timeout = setTimeout(
+      () => reject(new Error('Electron did not terminate after startup measurement')),
+      10_000
+    )
+    child.once('exit', () => {
+      clearTimeout(timeout)
+      resolvePromise()
+    })
+    if (process.platform === 'win32') {
+      const result = spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+        stdio: 'ignore'
+      })
+      if (result.error) {
+        clearTimeout(timeout)
+        reject(result.error)
+      }
+      return
+    }
+    if (!child.kill('SIGKILL')) {
+      clearTimeout(timeout)
+      reject(new Error('Failed to signal Electron for termination'))
+    }
+  })
 }
 
 function launchElectron(profilePath) {
@@ -191,12 +215,10 @@ function launchElectron(profilePath) {
       settled = true
       clearTimeout(timeout)
       setTimeout(() => {
-        killProcessTree(child)
-        if (error) {
-          reject(error)
-        } else {
-          resolvePromise(events)
-        }
+        void terminateProcessTree(child).then(
+          () => (error ? reject(error) : resolvePromise(events)),
+          reject
+        )
       }, 100)
     }
     const timeout = setTimeout(() => finish(new Error('Electron startup timed out')), 30_000)
@@ -212,7 +234,16 @@ function launchElectron(profilePath) {
           continue
         }
         events.push(parsed)
-        if (parsed.event === 'did-finish-load') {
+        const didFinishLoad = eventTime(events, 'did-finish-load')
+        const graphReady = eventTime(events, 'runtime-graph-ready')
+        const hasPostLoadStall = events.some(
+          (entry) =>
+            entry.event === 'event-loop-stall' &&
+            entry.time !== null &&
+            didFinishLoad !== null &&
+            entry.time >= didFinishLoad
+        )
+        if (didFinishLoad !== null && graphReady !== null && hasPostLoadStall) {
           finish()
         }
       }
@@ -255,8 +286,25 @@ async function main() {
     const afterStartup = inspectDatabase(join(profilePath, 'orchestration.db'))
     const appReady = eventTime(events, 'app-ready')
     const openWindow = eventTime(events, 'open-main-window-start')
-    const startupBlockingMs =
-      appReady === null || openWindow === null ? null : Number((openWindow - appReady).toFixed(1))
+    const didFinishLoad = eventTime(events, 'did-finish-load')
+    const graphReady = eventTime(events, 'runtime-graph-ready')
+    if (appReady === null || openWindow === null || didFinishLoad === null || graphReady === null) {
+      throw new Error('Required startup timing milestones were not observed')
+    }
+    const postLoadStalls = events.filter(
+      (entry) =>
+        entry.event === 'event-loop-stall' &&
+        entry.time !== null &&
+        entry.time >= didFinishLoad &&
+        entry.maxGapMs !== null
+    )
+    if (postLoadStalls.length === 0) {
+      throw new Error('No post-load event-loop-stall diagnostic was observed')
+    }
+    const startupBlockingMs = Number((openWindow - appReady).toFixed(1))
+    const firstGraphReadyMs = Number((graphReady - appReady).toFixed(1))
+    const graphAfterLoadMs = Number((graphReady - didFinishLoad).toFixed(1))
+    const maxEventLoopStallMs = Math.max(...postLoadStalls.map((entry) => entry.maxGapMs))
     const eventualAfterStartupMs = measureConstructor(
       join(profilePath, 'orchestration.db'),
       OrchestrationDb
@@ -265,7 +313,13 @@ async function main() {
     const result = {
       expected: args.expect,
       fixture: { rows: args.rows, distribution: '60% current unread undelivered' },
-      startup: { blockingMs: startupBlockingMs, database: afterStartup },
+      startup: {
+        blockingMs: startupBlockingMs,
+        firstGraphReadyMs,
+        graphAfterLoadMs,
+        maxEventLoopStallMs,
+        database: afterStartup
+      },
       eventual: {
         cleanTemplateMs: totalEventualMigrationMs,
         afterStartupMs: eventualAfterStartupMs,

@@ -85,6 +85,7 @@ import {
   type ProcessedAgentStatusChunk
 } from '../../shared/agent-status-osc'
 import { buildOrchestrationTaskDisplayMetadata } from '../../shared/orchestration-task-display'
+import { logStartupMilestone } from '../startup/startup-diagnostics'
 import {
   isTerminalInputTooLargeWithYield,
   TERMINAL_INPUT_TOO_LARGE_ERROR,
@@ -3986,8 +3987,18 @@ export class OrcaRuntimeService {
       this._orchestrationDb = new OrchestrationDb(this.getOrchestrationDbPathFn())
       this.ensureOrchestrationFederationRelay()
       this.scheduleRestoredMessageRepoints()
+      this.scheduleRequestedWorkerTerminalReleaseReconciliation()
     }
     return this._orchestrationDb
+  }
+
+  private scheduleRequestedWorkerTerminalReleaseReconciliation(): void {
+    if (!this._orchestrationDb) {
+      return
+    }
+    void reconcileRequestedWorkerTerminalReleases(this).catch((error) => {
+      console.warn('[orchestration] worker terminal release reconciliation failed', { error })
+    })
   }
 
   setOrchestrationDb(db: OrchestrationDb): void {
@@ -4264,8 +4275,11 @@ export class OrcaRuntimeService {
     if (candidate.dispatchStatus !== 'pending' && candidate.dispatchStatus !== 'dispatched') {
       return true
     }
+    if (!this._orchestrationDb) {
+      return false
+    }
     try {
-      this.getOrchestrationDb().reconcileMissingWorkerTerminal(
+      this._orchestrationDb.reconcileMissingWorkerTerminal(
         candidate.dispatchId,
         'The assigned worker terminal is no longer live after orchestration recovery.'
       )
@@ -4694,11 +4708,8 @@ export class OrcaRuntimeService {
       deferredDispatchIds: [...deferredDispatchIds]
     }
     this.updateLegacyWorkerTerminalRecoveryRetry(plan, deferredDispatchIds, options)
-    // Why: previously requested releases may only finish after the owning provider's terminals
-    // are rediscovered; this pass runs per scope (local and each reconnected provider).
-    void reconcileRequestedWorkerTerminalReleases(this).catch((error) => {
-      console.warn('[orchestration] worker terminal release reconciliation failed', { error })
-    })
+    // Why: provider rediscovery can unblock a previously requested release, but passive recovery must not open the DB.
+    this.scheduleRequestedWorkerTerminalReleaseReconciliation()
     return result
   }
 
@@ -5938,6 +5949,9 @@ export class OrcaRuntimeService {
       this.getNativeChatLaunchDraftResolutionClientEventSnapshot().map(
         ({ tabId, text, createdAt }) => ({ tabId, text, createdAt })
       )
+    if (!graphWasReady) {
+      logStartupMilestone('runtime-graph-ready')
+    }
     return {
       ...this.getStatus(),
       ...(agentOrchestrationByPaneKey ? { agentOrchestrationByPaneKey } : {}),
@@ -29640,11 +29654,7 @@ export class OrcaRuntimeService {
   }
 
   private getOrchestrationDbIfAvailable(): OrchestrationDb | null {
-    try {
-      return this._orchestrationDb ?? this.getOrchestrationDb()
-    } catch {
-      return this._orchestrationDb
-    }
+    return this._orchestrationDb
   }
 
   async hydrateInferredWorktreeLineage(): Promise<void> {
