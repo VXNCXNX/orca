@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import type { EphemeralVmRecipeContext } from './ephemeral-vm-recipe-runner'
 import {
   isRecipeProcessTreeAlive,
+  releaseRecipeProcessHandles,
   terminateRecipeProcess
 } from './ephemeral-vm-recipe-process-termination'
 
@@ -70,7 +71,8 @@ export async function runRecipeCommand(args: {
     let gracefulTerminationConfirmed = false
     let gracefulTerminationSettled = false
     let gracefulTreeKillerController: AbortController | undefined
-    let closeResult: ProcessRunResult | undefined
+    let stoppedResult: ProcessRunResult | undefined
+    let processExited = false
     let forceKillTimer: ReturnType<typeof setTimeout> | undefined
     let treeExitCheckTimer: ReturnType<typeof setTimeout> | undefined
     const finish = (result: ProcessRunResult): void => {
@@ -103,18 +105,26 @@ export async function runRecipeCommand(args: {
       args.forceAbortSignal?.removeEventListener('abort', forceAbort)
       reject(error)
     }
+    const finishUnconfirmedExitedProcess = (): void => {
+      if (!stoppedResult || settled) {
+        return
+      }
+      finish({ ...stoppedResult, aborted: true, terminationFailed: true })
+      releaseRecipeProcessHandles(child)
+    }
     const forceAbort = (): void => {
       if (settled || forceAborting) {
         return
       }
-      if (process.platform === 'win32' && closeResult && !gracefulTerminationConfirmed) {
-        if (gracefulTerminationSettled) {
-          finish({ ...closeResult, terminationFailed: true })
+      const wasAborted = aborted
+      aborted = true
+      if (process.platform === 'win32' && processExited && !gracefulTerminationConfirmed) {
+        if (!wasAborted || gracefulTerminationSettled) {
+          finishUnconfirmedExitedProcess()
         }
         return
       }
       forceAborting = true
-      aborted = true
       if (forceKillTimer) {
         clearTimeout(forceKillTimer)
       }
@@ -131,23 +141,20 @@ export async function runRecipeCommand(args: {
           aborted: true,
           ...(!confirmed ? { terminationFailed: true as const } : {})
         })
-        child.stdin.destroy()
-        child.stdout.destroy()
-        child.stderr.destroy()
-        child.unref()
+        releaseRecipeProcessHandles(child)
       })
     }
     const finishStoppedProcessTree = (): void => {
-      if (!closeResult || settled || forceAborting) {
+      if (!stoppedResult || settled || forceAborting) {
         return
       }
       if (gracefulTerminationConfirmed || !isRecipeProcessTreeAlive(child)) {
-        finish(closeResult)
+        finish(stoppedResult)
         return
       }
       if (process.platform === 'win32') {
         if (gracefulTerminationSettled) {
-          finish({ ...closeResult, terminationFailed: true })
+          finishUnconfirmedExitedProcess()
         }
         return
       }
@@ -201,6 +208,19 @@ export async function runRecipeCommand(args: {
       }
       fail(error)
     })
+    child.on('exit', (exitCode, signal) => {
+      processExited = true
+      stoppedResult = {
+        stdout,
+        stderr,
+        exitCode,
+        signal,
+        ...(aborted ? { aborted: true as const } : {})
+      }
+      if (aborted) {
+        finishStoppedProcessTree()
+      }
+    })
     child.on('close', (exitCode, signal) => {
       if (forceAborting) {
         return
@@ -216,7 +236,7 @@ export async function runRecipeCommand(args: {
         finish(result)
         return
       }
-      closeResult = result
+      stoppedResult = result
       finishStoppedProcessTree()
     })
 

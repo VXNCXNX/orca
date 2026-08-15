@@ -29,17 +29,21 @@ function nodeCommand(scriptPath: string): string {
   return `"${process.execPath}" "${scriptPath}"`
 }
 
+function makeMockChild(pid?: number) {
+  return Object.assign(new EventEmitter(), {
+    pid,
+    stdin: new PassThrough(),
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+    kill: vi.fn(),
+    unref: vi.fn()
+  })
+}
+
 describe('runRecipeCommand', () => {
   it('does not impose an implicit wall-clock deadline', async () => {
     vi.useFakeTimers()
-    const child = Object.assign(new EventEmitter(), {
-      pid: undefined,
-      stdin: new PassThrough(),
-      stdout: new PassThrough(),
-      stderr: new PassThrough(),
-      kill: vi.fn(),
-      unref: vi.fn()
-    })
+    const child = makeMockChild()
     const resultPromise = runRecipeCommand({
       command: 'destroy',
       repoPath: makeRepo(),
@@ -56,14 +60,7 @@ describe('runRecipeCommand', () => {
 
   it('force-kills an aborted recipe if graceful termination never closes it', async () => {
     vi.useFakeTimers()
-    const child = Object.assign(new EventEmitter(), {
-      pid: undefined,
-      stdin: new PassThrough(),
-      stdout: new PassThrough(),
-      stderr: new PassThrough(),
-      kill: vi.fn(),
-      unref: vi.fn()
-    })
+    const child = makeMockChild()
     const controller = new AbortController()
     const resultPromise = runRecipeCommand({
       command: 'destroy',
@@ -86,14 +83,7 @@ describe('runRecipeCommand', () => {
 
   it('force-kills and settles immediately when a deadline signal aborts', async () => {
     vi.useFakeTimers()
-    const child = Object.assign(new EventEmitter(), {
-      pid: undefined,
-      stdin: new PassThrough(),
-      stdout: new PassThrough(),
-      stderr: new PassThrough(),
-      kill: vi.fn(),
-      unref: vi.fn()
-    })
+    const child = makeMockChild()
     const controller = new AbortController()
     const resultPromise = runRecipeCommand({
       command: 'destroy',
@@ -116,14 +106,7 @@ describe('runRecipeCommand', () => {
   it('waits for Windows taskkill before deadline settlement', async () => {
     vi.useFakeTimers()
     const restorePlatform = setProcessPlatform('win32')
-    const child = Object.assign(new EventEmitter(), {
-      pid: 321,
-      stdin: new PassThrough(),
-      stdout: new PassThrough(),
-      stderr: new PassThrough(),
-      kill: vi.fn(),
-      unref: vi.fn()
-    })
+    const child = makeMockChild(321)
     const killer = Object.assign(new EventEmitter(), { kill: vi.fn(), unref: vi.fn() })
     const spawnTreeKiller = vi.fn(() => killer)
     const controller = new AbortController()
@@ -162,14 +145,7 @@ describe('runRecipeCommand', () => {
   it('reports an unconfirmed Windows tree kill and falls back to the wrapper', async () => {
     vi.useFakeTimers()
     const restorePlatform = setProcessPlatform('win32')
-    const child = Object.assign(new EventEmitter(), {
-      pid: 654,
-      stdin: new PassThrough(),
-      stdout: new PassThrough(),
-      stderr: new PassThrough(),
-      kill: vi.fn(),
-      unref: vi.fn()
-    })
+    const child = makeMockChild(654)
     const killer = Object.assign(new EventEmitter(), { kill: vi.fn(), unref: vi.fn() })
     const controller = new AbortController()
     try {
@@ -197,14 +173,7 @@ describe('runRecipeCommand', () => {
   it('bounds an unresponsive Windows tree killer', async () => {
     vi.useFakeTimers()
     const restorePlatform = setProcessPlatform('win32')
-    const child = Object.assign(new EventEmitter(), {
-      pid: 765,
-      stdin: new PassThrough(),
-      stdout: new PassThrough(),
-      stderr: new PassThrough(),
-      kill: vi.fn(),
-      unref: vi.fn()
-    })
+    const child = makeMockChild(765)
     const killer = Object.assign(new EventEmitter(), { kill: vi.fn(), unref: vi.fn() })
     const controller = new AbortController()
     try {
@@ -238,14 +207,7 @@ describe('runRecipeCommand', () => {
   it('omits Windows force mode for explicit Stop', async () => {
     vi.useFakeTimers()
     const restorePlatform = setProcessPlatform('win32')
-    const child = Object.assign(new EventEmitter(), {
-      pid: 987,
-      stdin: new PassThrough(),
-      stdout: new PassThrough(),
-      stderr: new PassThrough(),
-      kill: vi.fn(),
-      unref: vi.fn()
-    })
+    const child = makeMockChild(987)
     const killer = Object.assign(new EventEmitter(), { kill: vi.fn() })
     const spawnTreeKiller = vi.fn(() => killer)
     const controller = new AbortController()
@@ -277,14 +239,7 @@ describe('runRecipeCommand', () => {
   it('force-escalates a Windows Stop when the total deadline arrives', async () => {
     vi.useFakeTimers()
     const restorePlatform = setProcessPlatform('win32')
-    const child = Object.assign(new EventEmitter(), {
-      pid: 988,
-      stdin: new PassThrough(),
-      stdout: new PassThrough(),
-      stderr: new PassThrough(),
-      kill: vi.fn(),
-      unref: vi.fn()
-    })
+    const child = makeMockChild(988)
     const gracefulKiller = Object.assign(new EventEmitter(), { kill: vi.fn(), unref: vi.fn() })
     const forceKiller = Object.assign(new EventEmitter(), { kill: vi.fn(), unref: vi.fn() })
     const spawnTreeKiller = vi
@@ -323,17 +278,10 @@ describe('runRecipeCommand', () => {
     }
   })
 
-  it('does not force-kill a stale Windows PID after its owned shell closes', async () => {
+  it('does not force-kill a stale Windows PID after its owned shell exits', async () => {
     vi.useFakeTimers()
     const restorePlatform = setProcessPlatform('win32')
-    const child = Object.assign(new EventEmitter(), {
-      pid: 989,
-      stdin: new PassThrough(),
-      stdout: new PassThrough(),
-      stderr: new PassThrough(),
-      kill: vi.fn(),
-      unref: vi.fn()
-    })
+    const child = makeMockChild(989)
     const gracefulKiller = Object.assign(new EventEmitter(), { kill: vi.fn(), unref: vi.fn() })
     const spawnTreeKiller = vi.fn(() => gracefulKiller)
     const stopController = new AbortController()
@@ -352,7 +300,7 @@ describe('runRecipeCommand', () => {
       })
 
       stopController.abort()
-      child.emit('close', null, 'SIGTERM')
+      child.emit('exit', null, 'SIGTERM')
       deadlineController.abort()
       expect(spawnTreeKiller).toHaveBeenCalledOnce()
 
@@ -362,6 +310,7 @@ describe('runRecipeCommand', () => {
         terminationFailed: true
       })
       expect(spawnTreeKiller).toHaveBeenCalledOnce()
+      expect(child.kill).not.toHaveBeenCalled()
     } finally {
       restorePlatform()
     }
@@ -382,14 +331,7 @@ describe('runRecipeCommand', () => {
 
   it('clears the force-kill timer when graceful termination closes synchronously', async () => {
     vi.useFakeTimers()
-    const child = Object.assign(new EventEmitter(), {
-      pid: undefined,
-      stdin: new PassThrough(),
-      stdout: new PassThrough(),
-      stderr: new PassThrough(),
-      kill: vi.fn(),
-      unref: vi.fn()
-    })
+    const child = makeMockChild()
     child.kill.mockImplementation(() => {
       child.emit('close', null, 'SIGTERM')
       return true

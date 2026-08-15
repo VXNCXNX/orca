@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 
 export const RECIPE_PROCESS_TREE_TERMINATION_TIMEOUT_MS = 5_000
+const POSIX_PROCESS_TREE_EXIT_CHECK_INTERVAL_MS = 50
 
 export function terminateRecipeProcess(
   child: ChildProcessWithoutNullStreams,
@@ -26,13 +27,38 @@ export function terminateRecipeProcess(
     try {
       // Recipes run through a shell; the process group owns its descendants.
       process.kill(-child.pid, signal)
-      return Promise.resolve(force || !isPosixProcessGroupAlive(child.pid))
+      return force
+        ? waitForPosixProcessGroupExit(child.pid)
+        : Promise.resolve(!isPosixProcessGroupAlive(child.pid))
     } catch {
       // The direct child is the only remaining identity after its group is gone.
     }
   }
   child.kill(signal)
   return Promise.resolve(false)
+}
+
+function waitForPosixProcessGroupExit(pid: number): Promise<boolean> {
+  const deadline = Date.now() + RECIPE_PROCESS_TREE_TERMINATION_TIMEOUT_MS
+  return new Promise((resolve) => {
+    const check = (): void => {
+      if (!isPosixProcessGroupAlive(pid)) {
+        resolve(true)
+        return
+      }
+      const remainingMs = deadline - Date.now()
+      if (remainingMs <= 0) {
+        resolve(false)
+        return
+      }
+      const timer = setTimeout(
+        check,
+        Math.min(POSIX_PROCESS_TREE_EXIT_CHECK_INTERVAL_MS, remainingMs)
+      )
+      timer.unref()
+    }
+    check()
+  })
 }
 
 export function isRecipeProcessTreeAlive(child: ChildProcessWithoutNullStreams): boolean {
@@ -43,6 +69,13 @@ export function isRecipeProcessTreeAlive(child: ChildProcessWithoutNullStreams):
     return true
   }
   return isPosixProcessGroupAlive(child.pid)
+}
+
+export function releaseRecipeProcessHandles(child: ChildProcessWithoutNullStreams): void {
+  child.stdin.destroy()
+  child.stdout.destroy()
+  child.stderr.destroy()
+  child.unref()
 }
 
 function isPosixProcessGroupAlive(pid: number): boolean {
@@ -77,7 +110,7 @@ function terminateWindowsRecipeProcess(
       killer.kill('SIGKILL')
       killer.unref()
     }
-    const finish = (confirmed: boolean, killChild = true): void => {
+    const finish = (confirmed: boolean, killChild = force): void => {
       if (settled) {
         return
       }
@@ -98,7 +131,9 @@ function terminateWindowsRecipeProcess(
         { windowsHide: true, stdio: 'ignore' }
       )
     } catch {
-      child.kill(signal)
+      if (force) {
+        child.kill(signal)
+      }
       resolve(false)
       return
     }

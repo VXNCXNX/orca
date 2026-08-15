@@ -264,6 +264,45 @@ describe('ephemeral VM runtime service', () => {
     15_000
   )
 
+  it('persists actionable failure when destroy cannot start', async () => {
+    const userDataPath = makeDir('orca-ephemeral-vm-service-user-data-')
+    const repoPath = join(userDataPath, 'missing-repo')
+    const recipe: OrcaVmRecipe = {
+      id: 'cloud-sandbox',
+      name: 'Cloud Sandbox',
+      create: 'unused',
+      destroy: 'unused'
+    }
+    upsertEphemeralVmRuntime(userDataPath, {
+      id: 'runtime-missing-repo',
+      recipeId: recipe.id,
+      recipe,
+      status: 'running',
+      cleanupStatus: 'not_started',
+      createdAt: 1_000,
+      updatedAt: 1_000,
+      recipeResult: {
+        schemaVersion: 1,
+        pairingCode: makePairingCode(),
+        projectRoot: '/workspace/repo'
+      }
+    })
+
+    await expect(
+      cleanupEphemeralVmRuntime({
+        userDataPath,
+        repoPath,
+        recipe,
+        runtimeId: 'runtime-missing-repo'
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      runtime: { status: 'cleanup_failed', cleanupStatus: 'failed' },
+      error: expect.stringContaining('ENOENT')
+    })
+    expect(listEphemeralVmRuntimes(userDataPath)[0]?.cleanupLastError).toContain('ENOENT')
+  })
+
   it.skipIf(process.platform === 'win32')(
     'bounds a hung destroy to its exact process tree and retains retry state',
     async () => {

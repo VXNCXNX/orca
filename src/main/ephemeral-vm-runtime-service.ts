@@ -178,16 +178,28 @@ async function cleanupEphemeralVmRuntimeOnce(
     cleanupLastError: null,
     updatedAt: now
   })
-  const cleanup = await runEphemeralVmRecipeCleanup({
-    repoPath: args.repoPath,
-    recipe: args.recipe,
-    context: contextFromRuntime(args.repoPath, running),
-    recipeResult: running.recipeResult,
-    signal: args.signal,
-    forceAbortSignal: args.deadlineSignal,
-    onStdout: args.onStdout,
-    onStderr: args.onStderr
-  })
+  let cleanup
+  try {
+    cleanup = await runEphemeralVmRecipeCleanup({
+      repoPath: args.repoPath,
+      recipe: args.recipe,
+      context: contextFromRuntime(args.repoPath, running),
+      recipeResult: running.recipeResult,
+      signal: args.signal,
+      forceAbortSignal: args.deadlineSignal,
+      onStdout: args.onStdout,
+      onStderr: args.onStderr
+    })
+  } catch (cause) {
+    const error = cause instanceof Error ? cause.message : String(cause)
+    const failed = updateEphemeralVmRuntimeStatus(args.userDataPath, existing.id, {
+      status: 'cleanup_failed',
+      cleanupStatus: 'failed',
+      cleanupLastError: error,
+      updatedAt: Date.now()
+    })
+    return { ok: false, runtime: failed, error }
+  }
 
   const deadlineMs = getEphemeralVmDestroyDeadlineMs(args.deadlineSignal)
   if (!cleanup.ok || deadlineMs !== null) {
